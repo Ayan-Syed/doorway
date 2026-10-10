@@ -103,8 +103,9 @@ public sealed partial class LocalizerEngine
     const float UpdateDistance = 0.15f, UpdateAngle = 10f;
     // The scan only every ScanDistance walked (or UpdateAngle turned): its buffer holds two seconds of points, some
     // 2.5 m of walking, so weighed every 15 cm each point would count a dozen times or more over, and the clutter and
-    // plan errors in it with it. The stress walks drew tight on wrong poses half as often with this.
-    const float ScanDistance = 0.5f;
+    // plan errors in it with it. The stress walks drew tight on wrong poses half as often at 0.5 m, and at 0.75 m
+    // (with z_rand 0.3) less again, and without a sharp edge either side (the sensitivity analysis).
+    const float ScanDistance = 0.75f;
 
     readonly FloorPlan m_Plan;
     readonly Walkable m_Walkable;
@@ -474,8 +475,14 @@ public sealed partial class LocalizerEngine
     public void Step(double t, float compass, float length)
     {
         m_Time = t;
-        if (!Active || !m_Config.steps || m_Tracking)
+        if (!Active || !m_Config.steps)
             return;
+        if (m_Tracking)
+        {
+            LearnStep(t);
+            return;
+        }
+        m_StepAt = double.NaN;
         float heading, sigma;   // in ARCore's world
         if (!float.IsNaN(compass) && CompassKnown)
         {
@@ -492,10 +499,40 @@ public sealed partial class LocalizerEngine
         {
             return;
         }
-        m_Filter.StepBlindWorld(heading, length > 0f ? length : StepLength, StepLengthSigma, sigma);
-        StepShadows(heading, length > 0f ? length : StepLength, sigma);
+        if (!(length > 0f))
+            length = LearntStepLength;
+        m_Filter.StepBlindWorld(heading, length, StepLengthSigma, sigma);
+        StepShadows(heading, length, sigma);
         Measure();
     }
+
+    // The user's step, learnt while ARCore tracks (as the plate digits' height is): the camera's walk from one step to
+    // the next, steps under StepGapSeconds apart and of a plausible length only (a stop, a turn on the spot or a pose
+    // jump between two steps says nothing), averaged slowly. People's steps run 0.55 to 0.85 m; StepLength until learnt.
+    void LearnStep(double t)
+    {
+        if (!double.IsNaN(m_StepAt) && t - m_StepAt < StepGapSeconds)
+        {
+            float d = Vector2.Distance(m_Camera, m_StepCamera);
+            if (d >= MinStepLength && d <= MaxStepLength)
+            {
+                m_StepCount++;
+                // A running mean with StepLength counted as StepPrior steps, then a slow average.
+                float k = Mathf.Max(StepLearning, 1f / (m_StepCount + StepPrior));
+                LearntStepLength += k * (d - LearntStepLength);
+            }
+        }
+        m_StepAt = t;
+        m_StepCamera = m_Camera;
+    }
+
+    /// <summary>The step length blind steps use, metres: StepLength until learnt from ARCore.</summary>
+    public float LearntStepLength { get; private set; } = StepLength;
+    const float StepGapSeconds = 1.5f, MinStepLength = 0.3f, MaxStepLength = 1.2f, StepLearning = 0.05f;
+    double m_StepAt = double.NaN;
+    Vector2 m_StepCamera;
+    int m_StepCount;
+    const int StepPrior = 5;
 
     /// <summary>The time budget on the phone: at most this many particles from now on.</summary>
     public void LimitParticles(int max) => m_Filter.MaxCount = Mathf.Max(MinParticles, max);

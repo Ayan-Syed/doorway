@@ -55,8 +55,8 @@ public partial class NavigationScreen
             m_GuidancePending = -1f;
         }
         else if (m_GuidancePending < 0f)
-            m_GuidancePending = Time.unscaledTime;
-        else if (Time.unscaledTime - m_GuidancePending >= GuidanceHold)
+            m_GuidancePending = Now;
+        else if (Now - m_GuidancePending >= GuidanceHold)
         {
             m_Guidance = want;
             m_GuidancePending = -1f;
@@ -71,8 +71,7 @@ public partial class NavigationScreen
         if (FixAR())
             return;
         // Standing at the door, back to it: that's where the position is, for the Localizer from now on too.
-        if (localizer != null && Application.isPlaying)
-            SnapTo(m_From);
+        SnapTo(m_From);
         navigator.Begin(m_From, m_Destination);
         if (navigator.Route == null)
             return;

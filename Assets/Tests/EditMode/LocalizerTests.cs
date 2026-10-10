@@ -165,7 +165,9 @@ public class LocalizerTests
             Assert.AreEqual(0, run.violations, $"walk {i}: estimate in a wall");
             finals.Add(run.Final);
             // Lost, or kept from Localized by a cloud gone wide: either way unsure, and a sign should settle it.
-            if (double.IsNaN(run.firstSignWhileUnsure))
+            // (A sign in the walk's last RecoverySeconds can't show whether it recovers in time: not counted.)
+            if (double.IsNaN(run.firstSignWhileUnsure) ||
+                run.errors[run.errors.Count - 1].t - run.firstSignWhileUnsure < RecoverySeconds)
                 continue;
             tried++;
             if (run.SecondsUntilWithin(run.firstSignWhileUnsure, MedianTarget) <= RecoverySeconds)

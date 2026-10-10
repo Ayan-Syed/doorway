@@ -89,6 +89,38 @@ public class LocalizerStressTests
         Assert.AreNotEqual(LocalizerEngine.SnapCheck.Corrected, engine.LastSnapCheck, $"corrected to {engine.SnapCheckText}");
     }
 
+    // A user whose stride is 0.85 m, not the 0.7 m assumed: before the step length was learnt from ARCore, blind steps
+    // fell short and these walks ended up sure of a place 7 to 29 m off.
+    [TestCase(445)]
+    [TestCase(239)]
+    [TestCase(362)]
+    [TestCase(374)]
+    public void ALongerStrideIsLearntFromARCore(int seed)
+    {
+        EvaluationData data = Data();
+        SyntheticWalks.Mismatch = SyntheticWalks.MismatchKnobs.None;
+        SyntheticWalks.Mismatch.stepLength = 0.85f;
+        try
+        {
+            var tier = (SyntheticWalks.Tier)(seed % 3);
+            var lines = SyntheticWalks.Stress(data.StressFloor(), tier, seed, out SyntheticWalks.StressInfo info);
+            var engine = new LocalizerEngine(data.plan, data.walkable, data.field, data.walls, LocalizerEngine.Config.Full, 1);
+            var feeder = new ReplayEvaluator.Feeder(engine);
+            foreach (string line in lines)
+                feeder.Feed(line, out _, out _);
+            Assert.That(engine.LearntStepLength, Is.InRange(0.75f, 0.95f), "learnt step");
+            var walk = new ReplayEvaluator.StressWalk { name = $"stress-{seed:D4}", tier = tier, info = info.ToString(), lines = lines };
+            ReplayEvaluator.StressWalkResult r = ReplayEvaluator.ReplayStress(data.plan, data.walkable, data.field, data.walls,
+                LocalizerEngine.Config.Full, walk);
+            float worst = r.localizedErrors.Count > 0 ? r.localizedErrors.Max() : 0f;
+            Assert.AreEqual(0, r.wrong, $"seed {seed}: Localized {worst:F1} m off | {r.info}");
+        }
+        finally
+        {
+            SyntheticWalks.Mismatch = SyntheticWalks.MismatchKnobs.None;
+        }
+    }
+
     [Test]
     public void TypicalStressWalksMeetTheTargets()
     {

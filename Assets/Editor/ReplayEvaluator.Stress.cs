@@ -53,10 +53,10 @@ public static partial class ReplayEvaluator
     public const float WrongDistance = 3f;
 
     public static StressWalkResult ReplayStress(FloorPlan plan, Walkable walkable, DistanceField field, WallMatcher walls,
-        LocalizerEngine.Config config, StressWalk walk)
+        LocalizerEngine.Config config, StressWalk walk, int seed = 1)
     {
         var result = new StressWalkResult { walk = walk.name, config = config.name, info = walk.info, tier = walk.tier };
-        var engine = new LocalizerEngine(plan, walkable, field, walls, config, 1);
+        var engine = new LocalizerEngine(plan, walkable, field, walls, config, seed);
         var feeder = new Feeder(engine);
         double signWhileLost = double.NaN;
         foreach (string line in walk.lines)

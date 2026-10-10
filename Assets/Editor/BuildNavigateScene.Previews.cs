@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.UI;
 using Object = UnityEngine.Object;
+
+[assembly: InternalsVisibleTo("Doorway.Tests.EditMode")]
 
 // Screenshots without a phone: the scene is built as for an APK, then every screen is put up through
 // NavigationScreen's Preview hooks and rendered, by day and by night, to Builds/Previews/<theme>/<name>.png at a
@@ -71,6 +74,39 @@ public static partial class BuildNavigateScene
                 : $"{failed} screens didn't render: see the Console.", "OK");
     }
 
+    // For the flow tests: the scene built as for an APK, its screen laid out as a phone's. Null if it can't be built.
+    internal static NavigationScreen BuildForTests()
+    {
+        if (!CreateScene(DefaultTheme, out NavigationScreen screen))
+            return null;
+        LayOutLikeAPhone(screen);
+        return screen;
+    }
+
+    // The canvas in the world at a Galaxy Note 10's size, with the status and gesture bars the safe area avoids
+    // (SafeArea only runs on a phone).
+    static RectTransform LayOutLikeAPhone(NavigationScreen screen)
+    {
+        var canvas = screen.GetComponent<Canvas>();
+        canvas.renderMode = RenderMode.WorldSpace;
+        if (screen.TryGetComponent(out CanvasScaler scaler))
+            scaler.enabled = false;
+        var rect = (RectTransform)canvas.transform;
+        rect.SetPositionAndRotation(new Vector3(5000f, 0f, 0f), Quaternion.identity);
+        rect.localScale = Vector3.one;
+        rect.sizeDelta = new Vector2(PreviewWidth, PreviewHeight);
+        foreach (SafeArea area in screen.GetComponentsInChildren<SafeArea>(true))
+        {
+            var safe = (RectTransform)area.transform;
+            safe.anchorMin = Vector2.zero;
+            safe.anchorMax = Vector2.one;
+            safe.offsetMin = new Vector2(0f, PreviewGestureBar);
+            safe.offsetMax = new Vector2(0f, -PreviewStatusBar);
+        }
+        Canvas.ForceUpdateCanvases();
+        return rect;
+    }
+
     // Every screen by day (with an emoji marker) and by night (with the blue dot). Returns how many failed.
     static int RenderAll(NavigationScreen screen)
     {
@@ -130,23 +166,7 @@ public static partial class BuildNavigateScene
                 ? plan.NodePosition(exit.doors[0].node) + exit.doors[0].Direction.normalized * 14f
                 : m_Spot + new Vector2(0f, 80f);
 
-            // A phone's screen: the canvas in the world at the screen's size, with the bars the safe area avoids.
-            var canvas = screen.GetComponent<Canvas>();
-            canvas.renderMode = RenderMode.WorldSpace;
-            if (screen.TryGetComponent(out CanvasScaler scaler))
-                scaler.enabled = false;
-            m_Canvas = (RectTransform)canvas.transform;
-            m_Canvas.SetPositionAndRotation(new Vector3(5000f, 0f, 0f), Quaternion.identity);
-            m_Canvas.localScale = Vector3.one;
-            m_Canvas.sizeDelta = new Vector2(PreviewWidth, PreviewHeight);
-            foreach (SafeArea area in screen.GetComponentsInChildren<SafeArea>(true))
-            {
-                var rect = (RectTransform)area.transform;
-                rect.anchorMin = Vector2.zero;
-                rect.anchorMax = Vector2.one;
-                rect.offsetMin = new Vector2(0f, PreviewGestureBar);
-                rect.offsetMax = new Vector2(0f, -PreviewStatusBar);
-            }
+            m_Canvas = LayOutLikeAPhone(screen);
 
             m_Target = new RenderTexture(PreviewWidth, PreviewHeight, 24, RenderTextureFormat.ARGB32) { antiAliasing = 4 };
             m_Target.Create();

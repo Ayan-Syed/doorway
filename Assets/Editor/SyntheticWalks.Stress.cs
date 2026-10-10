@@ -275,10 +275,14 @@ public static partial class SyntheticWalks
 
         // ARCore, depth and the user.
         info.arScale = 1f + Uniform(arRandom, -k.arScale, k.arScale);
+        if (Mismatch.arScale != 0f)
+            info.arScale = 1f + Mismatch.arScale;
         info.arDrift = Uniform(arRandom, k.driftMin, k.driftMax);
         float arYaw = Uniform(arRandom, -180f, 180f);
         info.depthMissing = Uniform(depthRandom, k.missingMin, k.missingMax);
         info.depthBias = Uniform(depthRandom, -k.bias, k.bias);
+        if (Mismatch.depthBias != 0f)
+            info.depthBias = Mismatch.depthBias;
         info.speed = Uniform(userRandom, k.speedMin, k.speedMax);
         info.lowered = Uniform(userRandom, k.loweredMin, k.loweredMax);
         float compassOffset = Uniform(userRandom, -180f, 180f), compassBias = Uniform(userRandom, -k.compassBias, k.compassBias);
@@ -438,10 +442,12 @@ public static partial class SyntheticWalks
 
             // Steps (always counted; used only while ARCore can't track) and the compass.
             sinceStep += step.magnitude;
-            float compass = Mathf.Repeat(phoneHeading - compassOffset + compassBias + Gaussian(userRandom) * k.compassNoise, 360f);
-            if (sinceStep >= 0.7f)
+            // A compass bias that drifts (the building's steel) by Mismatch.compassDrift degrees over 60 s, back and forth.
+            float drift = Mismatch.compassDrift * Mathf.Sin((float)t * 2f * Mathf.PI / 120f);
+            float compass = Mathf.Repeat(phoneHeading - compassOffset + compassBias + drift + Gaussian(userRandom) * k.compassNoise, 360f);
+            if (sinceStep >= Mismatch.stepLength)
             {
-                sinceStep -= 0.7f;
+                sinceStep -= Mismatch.stepLength;
                 log.Add(Row("k", t, F(compass, 1), 0f));
             }
             if (tracking && t >= nextCompass)
@@ -530,6 +536,20 @@ public static partial class SyntheticWalks
         };
     }
 
+    /// <summary>The world worse than the filter assumes, on top of every tier (sensitivity analysis): depth noise
+    /// and false plates as multiples, depth bias and ARCore's scale error as fixed fractions (0: the tier's own), the
+    /// compass bias drifting this many degrees, the plan's wall offsets as multiples (of 10 to 30 cm, and of how many
+    /// walls), and the user's
+    /// real step length (the engine assumes 0.7 m).</summary>
+    public struct MismatchKnobs
+    {
+        public float depthNoise, depthBias, arScale, compassDrift, falsePlates, wallError, wallCount, stepLength;
+        public static MismatchKnobs None => new MismatchKnobs
+            { depthNoise = 1f, falsePlates = 1f, wallError = 1f, wallCount = 1f, stepLength = 0.7f };
+    }
+
+    public static MismatchKnobs Mismatch = MismatchKnobs.None;
+
     /// <summary>Entrances further apart than this, metres, GPS tells apart before the user is in.</summary>
     public const float ConfusableEntrance = 25f;
 
@@ -611,7 +631,7 @@ public static partial class SyntheticWalks
         }
 
         // Walls a little off where the plan has them: pushed out into the room or back into the wall.
-        int offsets = random.Next(k.wallOffsets + 1);
+        int offsets = Mathf.RoundToInt(random.Next(k.wallOffsets + 1) * Mismatch.wallCount);
         for (int n = 0; n < offsets; n++)
         {
             var (a, b) = floor.walls[random.Next(floor.walls.Count)];
@@ -623,7 +643,7 @@ public static partial class SyntheticWalks
                 v = -v;
             if (world.At(middle + v * 0.2f) != World.Open)
                 continue;
-            float offset = Uniform(random, 0.1f, 0.3f), half = Vector2.Distance(wa, wb) * 0.5f;
+            float offset = Uniform(random, 0.1f, 0.3f) * Mismatch.wallError, half = Vector2.Distance(wa, wb) * 0.5f;
             if (random.NextDouble() < 0.5)
             {
                 if (NearPath(middle + v * offset, 0.7f))
@@ -773,7 +793,7 @@ public static partial class SyntheticWalks
             previous = hit;
             if (range < 0f || random.NextDouble() < info.depthMissing)
                 continue;
-            range = range * (1f + info.depthBias) + Gaussian(random) * 0.01f * range * range;
+            range = range * (1f + info.depthBias) + Gaussian(random) * 0.01f * Mismatch.depthNoise * range * range;
             if (range < 0.4f || range > MaxDepth)
                 continue;
             // From the world to ARCore's world: turned, scaled, offset as ARCore sees it now.
@@ -855,7 +875,7 @@ public static partial class SyntheticWalks
             log.Add(Row("s", t, text, ar.x, ar.y, F(bearing, 2), F(arRange, 3), F(sigma, 3), measured ? 1 : 0));
         }
         // A plate read where there's none (a poster, a sign for something else).
-        if (random.NextDouble() < k.falsePlatesPerMinute / 60f / SightRate)
+        if (random.NextDouble() < k.falsePlatesPerMinute * Mismatch.falsePlates / 60f / SightRate)
         {
             string text = floor.signs[random.Next(floor.signs.Count)].text;
             float bearing = heading + world.turn + arYaw + Uniform(random, -25f, 25f);

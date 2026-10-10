@@ -40,6 +40,9 @@ public class RouteRibbon : MonoBehaviour
     const float StillBelow = 0.6f;         // the chevrons stop (or run again) once faded past this
     static readonly int ScrollSpeedId = Shader.PropertyToID("_ScrollSpeed");
     float m_Alpha = 1f, m_TargetAlpha = 1f;
+
+    // The alpha SetGuidance last asked for (the band fades to it).
+    public float GuidanceAlpha => m_TargetAlpha;
     bool m_Scrolling = true;
     float m_ScrollSpeed = float.NaN;
     MaterialPropertyBlock m_Block;

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -11,8 +12,84 @@ using UnityEngine.UI;
 //   Lost        grey with a "?", and a banner asking for a room number (or a door to start from)
 // The snap card is the way in: offered by the Localizer when it thinks the phone just came through an entrance, or
 // opened by hand ("I'm inside", or a room door from the door list).
+// What the screen needs from indoor positioning: on a phone the Localizer (NavigationScreen wraps it), in the flow
+// tests a script. Everything the screen reads or asks of the Localizer goes through this.
+public interface IIndoorSource
+{
+    LocalizerState State { get; }
+    Vector2 Position { get; }
+    float Heading { get; }
+    float Spread { get; }
+    bool NeedsView { get; }
+    bool AskForSign { get; }
+    string AskReason { get; }
+    bool EntrancePrompt { get; }
+    PlanDoor EntranceGuess { get; }
+    LocalizerEngine.SnapCheck LastSnapCheck { get; }
+    string SnapCheckText { get; }
+    event Action<string> SignRead;
+    event Action StateChanged;
+    void SnapToDoor(PlanDoor door);
+    void DismissEntrancePrompt();
+    void GoOutdoors();
+    // A walk from the current position (Navigator.BeginFrom on a phone). False if there's no way, or not sure enough.
+    bool BeginFrom(Navigator navigator, PlanPlace to);
+}
+
 public partial class NavigationScreen
 {
+    // The Localizer as an IIndoorSource.
+    sealed class LocalizerSource : IIndoorSource
+    {
+        readonly Localizer m_Localizer;
+        public LocalizerSource(Localizer localizer) => m_Localizer = localizer;
+        public LocalizerState State => m_Localizer.State;
+        public Vector2 Position => m_Localizer.Position;
+        public float Heading => m_Localizer.Heading;
+        public float Spread => m_Localizer.Spread;
+        public bool NeedsView => m_Localizer.NeedsView;
+        public bool AskForSign => m_Localizer.AskForSign;
+        public string AskReason => m_Localizer.AskReason;
+        public bool EntrancePrompt => m_Localizer.EntrancePrompt;
+        public PlanDoor EntranceGuess => m_Localizer.EntranceGuess;
+        public LocalizerEngine.SnapCheck LastSnapCheck => m_Localizer.LastSnapCheck;
+        public string SnapCheckText => m_Localizer.SnapCheckText;
+        public event Action<string> SignRead
+        {
+            add => m_Localizer.SignRead += value;
+            remove => m_Localizer.SignRead -= value;
+        }
+        public event Action StateChanged
+        {
+            add => m_Localizer.StateChanged += value;
+            remove => m_Localizer.StateChanged -= value;
+        }
+        public void SnapToDoor(PlanDoor door) => m_Localizer.SnapToDoor(door);
+        public void DismissEntrancePrompt() => m_Localizer.DismissEntrancePrompt();
+        public void GoOutdoors() => m_Localizer.GoOutdoors();
+        public bool BeginFrom(Navigator navigator, PlanPlace to) => navigator.BeginFrom(to);
+    }
+
+    IIndoorSource m_Source;
+
+    // Where the indoor position comes from: the scene's Localizer unless something else is set (the flow tests).
+    public IIndoorSource IndoorSource
+    {
+        get => m_Source;
+        set
+        {
+            if (m_Source == value)
+                return;
+            UnwireIndoor();
+            m_Source = value;
+            if (m_Source != null)
+            {
+                m_Source.SignRead += OnSignRead;
+                m_Source.StateChanged += OnIndoorStateChanged;
+            }
+        }
+    }
+
     [Header("Indoor positioning")]
     [Tooltip("Keeps the position indoors. None: GPS only, every walk starts at a door.")]
     public Localizer localizer;
@@ -92,25 +169,25 @@ public partial class NavigationScreen
     bool m_SwallowSettingsTap;     // the long press opened the overlay: the tap that ends it doesn't open Settings
     bool m_Debug;
 
-    bool Positioning => localizer != null || m_PreviewingIndoor;
+    bool Positioning => m_Source != null || m_PreviewingIndoor;
 
     Indoor ReadIndoor()
     {
         if (m_PreviewingIndoor)
             return m_PreviewIndoor;
-        if (localizer == null)
+        if (m_Source == null)
             return default;   // Outdoors
         return new Indoor
         {
-            state = localizer.State,
-            position = localizer.Position,
-            heading = localizer.Heading,
-            spread = localizer.Spread,
-            needsView = localizer.NeedsView,
-            askForSign = localizer.AskForSign,
-            entrancePrompt = localizer.EntrancePrompt,
-            entranceGuess = localizer.EntranceGuess,
-            askReason = localizer.AskReason,
+            state = m_Source.State,
+            position = m_Source.Position,
+            heading = m_Source.Heading,
+            spread = m_Source.Spread,
+            needsView = m_Source.NeedsView,
+            askForSign = m_Source.AskForSign,
+            entrancePrompt = m_Source.EntrancePrompt,
+            entranceGuess = m_Source.EntranceGuess,
+            askReason = m_Source.AskReason,
         };
     }
 
@@ -118,11 +195,8 @@ public partial class NavigationScreen
     {
         if (localizer == null)
             localizer = FindAnyObjectByType<Localizer>();
-        if (localizer != null)
-        {
-            localizer.SignRead += OnSignRead;
-            localizer.StateChanged += OnIndoorStateChanged;
-        }
+        if (m_Source == null && localizer != null)
+            IndoorSource = new LocalizerSource(localizer);
         if (insideButton != null)
             insideButton.GetComponent<Button>().onClick.AddListener(OnInside);
         if (snapConfirm != null)
@@ -162,10 +236,10 @@ public partial class NavigationScreen
 
     void UnwireIndoor()
     {
-        if (localizer == null)
+        if (m_Source == null)
             return;
-        localizer.SignRead -= OnSignRead;
-        localizer.StateChanged -= OnIndoorStateChanged;
+        m_Source.SignRead -= OnSignRead;
+        m_Source.StateChanged -= OnIndoorStateChanged;
     }
 
     // Every frame: the snap card when the Localizer offers it, the dot, the banner, "I'm inside".
@@ -362,8 +436,8 @@ public partial class NavigationScreen
         if (m_SnapFromPrompt)
         {
             m_PromptHandled = true;   // not offered again until the Localizer stops asking and asks again
-            if (answered && localizer != null)
-                localizer.DismissEntrancePrompt();
+            if (answered && m_Source != null)
+                m_Source.DismissEntrancePrompt();
         }
         // The map back as the step had it.
         if (m_Step == Step.Home)
@@ -411,35 +485,35 @@ public partial class NavigationScreen
     // a room number) is watched for from then on.
     void SnapTo(PlanDoor door)
     {
-        if (localizer == null || door == null)
+        if (m_Source == null || door == null)
             return;
-        localizer.SnapToDoor(door);
+        m_Source.SnapToDoor(door);
         m_AwaitingCheck = true;
     }
 
     // The check, once it comes: a tick on the dot for a moment, or a word on where the user really is.
     void UpdateSnapCheck()
     {
-        if (m_AwaitingCheck && localizer != null)
+        if (m_AwaitingCheck && m_Source != null)
         {
-            LocalizerEngine.SnapCheck check = localizer.LastSnapCheck;
+            LocalizerEngine.SnapCheck check = m_Source.LastSnapCheck;
             if (check == LocalizerEngine.SnapCheck.Confirmed)
             {
                 m_AwaitingCheck = false;
-                m_CheckUntil = Time.unscaledTime + CheckSeconds;
+                m_CheckUntil = Now + CheckSeconds;
                 Haptics.Tick(15);
             }
             else if (check == LocalizerEngine.SnapCheck.Corrected)
             {
                 m_AwaitingCheck = false;
                 // The plate read: "121" is Room 121.
-                string text = localizer.SnapCheckText;
+                string text = m_Source.SnapCheckText;
                 Snack(string.IsNullOrEmpty(text) ? "Corrected your position"
                     : char.IsDigit(text[0]) ? $"Corrected to Room {text}" : $"Corrected to {text}");
                 Haptics.Tick(40);
             }
         }
-        map.ShowPuckCheck(Time.unscaledTime < m_CheckUntil && m_Indoor.state != LocalizerState.Outdoors);
+        map.ShowPuckCheck(Now < m_CheckUntil && m_Indoor.state != LocalizerState.Outdoors);
     }
 
     // "I'm inside": the snap card at the entrance nearest the phone's location (the first if there's no fix).
@@ -501,10 +575,10 @@ public partial class NavigationScreen
         PlanPlace place = m_Selected;
         if (place == null)
             return;
-        if (m_Indoor.state == LocalizerState.Localized && localizer != null && Application.isPlaying)
+        if (m_Indoor.state == LocalizerState.Localized && m_Source != null)
         {
             m_Destination = m_Selected = place;
-            if (navigator.BeginFrom(place))
+            if (m_Source.BeginFrom(navigator, place))
             {
                 Haptics.Tick(40);
                 m_AnnouncedRoute = null;
@@ -531,8 +605,7 @@ public partial class NavigationScreen
     {
         if (m_Indoor.state == LocalizerState.Outdoors)
             return;
-        if (localizer != null)
-            localizer.GoOutdoors();
+        m_Source?.GoOutdoors();
         CloseSettings();
         Haptics.Tick(15);
         Snack("Outdoors · the map follows GPS again");

@@ -18,8 +18,9 @@ public sealed class ScanMatcher
 {
     /// <summary>σ_hit, metres: the plan's walls are good to about 10 cm, depth to about 5.</summary>
     public const float HitSigma = 0.15f;
-    /// <summary>z_hit and z_rand (Probabilistic Robotics, §6.4).</summary>
-    public const float HitWeight = 0.8f, RandomWeight = 0.2f;
+    /// <summary>z_hit and z_rand (Probabilistic Robotics, §6.4). z_rand at 0.3 rather than 0.2: in the sensitivity
+    /// analysis (stress walks, the world worse than assumed) the cloud was much less often sure of a wrong place.</summary>
+    public const float HitWeight = 0.7f, RandomWeight = 0.3f;
     /// <summary>At most this many points of a scan are scored (§6.3.4's subsampling).</summary>
     public const int MaxPoints = 200;
     /// <summary>Fewer points than this aren't a scan.</summary>

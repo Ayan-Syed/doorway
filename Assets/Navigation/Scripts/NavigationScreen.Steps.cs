@@ -139,7 +139,7 @@ public partial class NavigationScreen
         if (Application.isPlaying)
         {
             bool ar = step >= Step.Start && step <= Step.Guide;
-            bool inside = localizer != null && localizer.Indoors;
+            bool inside = m_Source != null && m_Source.State != LocalizerState.Outdoors;
             if (!inside)
                 navigator.SetARActive(ar);
             Screen.sleepTimeout = ar || inside ? SleepTimeout.NeverSleep : SleepTimeout.SystemSetting;
