@@ -27,14 +27,14 @@ public class DeterminismTests
     }
 
     // The harness's band per metric (seeds 1+2, 3+4 ... 15+16): p75 0.540 ± 0.013 m, %wrong 0.012 ± 0.023,
-    // %sure 52.0 ± 0.8, %Lost 0.82 ± 0.70, calibration 0.841 ± 0.008 (mean ± sd).
+    // %sure 55.5 ± 0.7, %Lost 0.82 ± 0.70, calibration 0.656 ± 0.011 (mean ± sd).
     static readonly (string name, float low, float high)[] Bands =
     {
         ("p75 (m)", 0.48f, 0.60f),
         ("%wrong", 0f, 0.2f),
-        ("%sure", 48.5f, 55.5f),
+        ("%sure", 52.5f, 58.5f),
         ("%Lost", 0f, 3.6f),
-        ("calibration", 0.80f, 0.88f),
+        ("calibration", 0.61f, 0.70f),
     };
 
     [Test]

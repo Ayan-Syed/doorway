@@ -84,8 +84,12 @@ public sealed partial class LocalizerEngine
     int m_FixStreak;
     float m_FixWalk;
 
-    /// <summary>The scale term in Spread, metres: the scale's spread times the walk since the last absolute fix.</summary>
+    /// <summary>The scale term, metres: the scale's spread times the walk since the last absolute fix (see Measure).
+    /// </summary>
     public float ScaleTerm { get; private set; }
+    /// <summary>How far off along the way the position may be besides Spread, metres (ARCore's scale since the last
+    /// absolute fix): guidance weighs it near a turn.</summary>
+    public float AlongSpread => ScaleTerm;
     /// <summary>Walls across the way seen so far (absolute fixes along the hallway).</summary>
     public int WallFixes { get; private set; }
     const float SpreadScale = 0.4f, SpreadAfterLoss = 0.8f, LossMemory = 60f;
@@ -598,13 +602,15 @@ public sealed partial class LocalizerEngine
         float radius = m_Filter.Radius(0.68f);
         // ARCore's scale isn't known exactly: walked since the last absolute fix, the cloud's place along the way is
         // off by up to the scale's own spread times that walk (the cloud alone can't show it: every particle walks
-        // it alike but for its scale). In Spread, and sure only while it's under ScaleGate.
+        // it alike but for its scale). Sure only while it's under ScaleGate. It's AlongSpread, not in Spread: an
+        // error along the hallway changes no instruction mid-corridor (in the stress walks, putting it in Spread took
+        // 11 points of guidance time for no less guided error), so guidance weighs it only near a turn.
         ScaleTerm = Mathf.Max(m_Filter.ScaleSpread, MinScaleSigma) * m_FixWalk;
-        // Spread is the cloud's 68% radius, scaled, with the scale term on top, to hold the error about 68% of the time
-        // (the stress walks: the cloud is wider than the error, except after ARCore has lost tracking, when its jumps
-        // are on top).
+        // Spread is the cloud's 68% radius, scaled to hold the error about 68% of the time (the stress walks: the cloud
+        // is wider than the error, except after ARCore has lost tracking, when its jumps are on top), and at least what
+        // the cloud doesn't show of the doubt (AmbiguitySpread).
         Spread = radius * (m_Time - m_LastLoss < LossMemory ? SpreadAfterLoss : SpreadScale);
-        Spread = Mathf.Sqrt(Spread * Spread + ScaleTerm * ScaleTerm);
+        Spread = Mathf.Max(Spread, AmbiguitySpread());
         Confidence = m_Filter.Confidence;
 
         bool blind = m_UntrackedSince >= 0 && m_Time - m_UntrackedSince >= BlindSeconds;
