@@ -1,11 +1,20 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
 // Drag to pan (with a fling), pinch or scroll to zoom, tap a place or a building. No rotate or tilt gestures: the
 // map turns only through Overview, Follow or FramePoints, and tilts only through the 3D setting.
+// Not interactive but with zoomGestures (the minimap while walking): pinch or scroll changes followZoom, so it zooms
+// and keeps following; one finger does nothing; a tap is Tapped.
 public partial class FloorMap
 {
+    [Tooltip("While not interactive: pinch and scroll zoom it (followZoom, so it keeps following) and a tap is Tapped.")]
+    public bool zoomGestures;
+
+    // A tap on a map that isn't interactive but has zoomGestures.
+    public event Action Tapped;
+
     readonly Dictionary<int, Vector2> m_Pointers = new Dictionary<int, Vector2>();
     Vector2 m_Velocity;      // window units a second
     float m_LastDragTime;
@@ -23,13 +32,15 @@ public partial class FloorMap
 
     public void OnPointerDown(PointerEventData e)
     {
-        if (!interactive)
+        if (!interactive && !zoomGestures)
             return;
         if (m_Pointers.Count == 0)
             m_Pinched = false;
         m_Pointers[e.pointerId] = Local(e);
         if (m_Pointers.Count > 1)
             m_Pinched = true;
+        if (!interactive)
+            return;   // zoomGestures: it keeps following
         // A touch stops any fling, view animation or following.
         m_Velocity = Vector2.zero;
         m_Animating = false;
@@ -57,12 +68,28 @@ public partial class FloorMap
 
     public void OnDrag(PointerEventData e)
     {
-        if (!interactive || m_Plan == null)
+        if ((!interactive && !zoomGestures) || m_Plan == null)
             return;
         Vector2 now = Local(e);
         if (!m_Pointers.TryGetValue(e.pointerId, out Vector2 before))
             before = now;
         m_Pointers[e.pointerId] = now;
+
+        if (!interactive)
+        {
+            // zoomGestures: two fingers zoom it, round the user (Follow keeps them where they are on it).
+            if (m_Pointers.Count < 2)
+                return;
+            foreach (KeyValuePair<int, Vector2> pointer in m_Pointers)
+                if (pointer.Key != e.pointerId)
+                {
+                    float spanFrom = Vector2.Distance(before, pointer.Value);
+                    if (spanFrom > 20f)
+                        ZoomFollow(Vector2.Distance(now, pointer.Value) / spanFrom);
+                    break;
+                }
+            return;
+        }
 
         if (m_Pointers.Count == 1)
         {
@@ -99,9 +126,20 @@ public partial class FloorMap
     // The mouse wheel, in the editor and on a desktop.
     public void OnScroll(PointerEventData e)
     {
-        if (!interactive || m_Plan == null)
+        if (m_Plan == null)
             return;
-        ZoomAt(Local(e), e.scrollDelta.y > 0f ? 1.2f : 1f / 1.2f);
+        float factor = e.scrollDelta.y > 0f ? 1.2f : 1f / 1.2f;
+        if (interactive)
+            ZoomAt(Local(e), factor);
+        else if (zoomGestures)
+            ZoomFollow(factor);
+    }
+
+    // The zoom Follow keeps: zoomGestures' pinch and scroll.
+    void ZoomFollow(float factor)
+    {
+        followZoom = Mathf.Clamp(followZoom * factor, minZoom, maxZoom);
+        m_Dirty = true;
     }
 
     // Moves the map with the finger; the middle stays over the campus (or the floor, without one).
@@ -124,7 +162,13 @@ public partial class FloorMap
 
     public void OnPointerClick(PointerEventData e)
     {
-        if (!interactive || e.dragging || m_Pinched || m_Plan == null)
+        if (!interactive)
+        {
+            if (zoomGestures && !e.dragging && !m_Pinched)
+                Tapped?.Invoke();
+            return;
+        }
+        if (e.dragging || m_Pinched || m_Plan == null)
             return;
         Vector2 at = Local(e);
         Vector2 point = ToPlan(at);

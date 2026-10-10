@@ -181,6 +181,21 @@ public partial class NavigationScreen
         SetStatus(status, PlaceStyle.Waiting);
     }
 
+    // Walking with the minimap tapped big and pinched out a little (NavigationScreen.MiniMap).
+    public void PreviewMiniMapBig()
+    {
+        m_MiniMapBig = true;
+        miniMap.followZoom *= 0.75f;
+        StyleMiniMapIcon();
+        UpdateGuide(true);
+    }
+
+    // Re-align tapped mid-walk: the door list over the map in close round where the walk had got to.
+    public void PreviewRealign()
+    {
+        Realign();
+    }
+
     public void PreviewArrived(PlanPlace destination)
     {
         PreviewBegin();

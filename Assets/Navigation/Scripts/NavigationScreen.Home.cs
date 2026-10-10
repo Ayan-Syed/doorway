@@ -63,7 +63,17 @@ public partial class NavigationScreen
     void FillHome()
     {
         homeList.Clear();
-        AddRooms(false);
+        AddGrouped(homeList, null, (place, parent) =>
+            homeList.AddRow(place.kind, PlaceStyle.Title(place), place.detail, () => ShowPlace(place), parent: parent));
+    }
+
+    // Every place but skip, grouped as the directory has them, each group a dropdown: the named kinds of room, then
+    // restrooms, elevators and stairs, and entrances, then Other rooms and Other spaces. add(place, parent) adds the
+    // place's row or rows to list under the row parent (-1: none) and returns the row the rooms inside it go under
+    // (-1: none, and they go in as rows of their own). The directory adds a row per place, the door lists one per door.
+    void AddGrouped(PlaceList list, PlanPlace skip, Func<PlanPlace, int, int> add)
+    {
+        AddRooms(list, false, skip, add);
         foreach (var (title, kinds) in Sections)
         {
             if (Array.IndexOf(kinds, "room") >= 0)
@@ -71,22 +81,24 @@ public partial class NavigationScreen
             bool header = false;
             foreach (PlanPlace place in Places(kinds))
             {
+                if (place == skip)
+                    continue;
                 if (!header)
                 {
-                    homeList.AddSection(title, dropdown: true);
+                    list.AddSection(title, dropdown: true);
                     header = true;
                 }
-                homeList.AddRow(place.kind, PlaceStyle.Title(place), place.detail, () => ShowPlace(place));
+                add(place, -1);
             }
         }
-        AddRooms(true);
+        AddRooms(list, true, skip, add);
     }
 
     // A dropdown per kind of room the plan names ("Classroom" -> Classrooms), the biggest first; or, for other, the
     // plain "Room"s in Other rooms and then the one-of-a-kind ones in Other spaces. A room inside another
     // ("Inside 145") goes under it, behind its "n inside" button; one inside a room that's itself inside one goes
-    // under the outermost.
-    void AddRooms(bool other)
+    // under the outermost. A dropdown left with nothing in it (only skip) doesn't show.
+    void AddRooms(PlaceList list, bool other, PlanPlace skip, Func<PlanPlace, int, int> add)
     {
         List<PlanPlace> rooms = Places(new[] { "room" }).ToList();
         var byNumber = new Dictionary<string, PlanPlace>();
@@ -107,9 +119,9 @@ public partial class NavigationScreen
                 outer.Add(room);
                 continue;
             }
-            if (!inside.TryGetValue(parent, out List<PlanPlace> list))
-                inside.Add(parent, list = new List<PlanPlace>());
-            list.Add(room);
+            if (!inside.TryGetValue(parent, out List<PlanPlace> inParent))
+                inside.Add(parent, inParent = new List<PlanPlace>());
+            inParent.Add(room);
         }
 
         var types = outer.GroupBy(r => r.detail ?? "").ToDictionary(g => g.Key, g => g.Count());
@@ -128,18 +140,15 @@ public partial class NavigationScreen
 
         foreach (IGrouping<string, PlanPlace> group in groups)
         {
-            homeList.AddSection(group.Key, dropdown: true);
+            list.AddSection(group.Key, dropdown: true);
             foreach (PlanPlace room in group)
             {
-                PlanPlace place = room;
-                int row = homeList.AddRow(place.kind, PlaceStyle.Title(place), place.detail, () => ShowPlace(place));
-                if (!inside.TryGetValue(place, out List<PlanPlace> within))
+                int row = room == skip ? -1 : add(room, -1);
+                if (!inside.TryGetValue(room, out List<PlanPlace> within))
                     continue;
                 foreach (PlanPlace child in within)
-                {
-                    PlanPlace inner = child;
-                    homeList.AddRow(inner.kind, PlaceStyle.Title(inner), inner.detail, () => ShowPlace(inner), parent: row);
-                }
+                    if (child != skip)
+                        add(child, row);
             }
         }
     }

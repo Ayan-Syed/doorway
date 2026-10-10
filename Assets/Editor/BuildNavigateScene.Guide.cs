@@ -103,12 +103,18 @@ public static partial class BuildNavigateScene
         // The minimap: heading-up, the walked part of the route cut off. A canvas of its own, like the big map.
         RectTransform mini = Fixed("Minimap", panel, new Vector2(1f, 0f), new Vector2(-32f, 262f), new Vector2(380f, 380f));
         mini.pivot = new Vector2(1f, 0f);
-        mini.gameObject.AddComponent<Canvas>();
+        // Its own raycaster: it takes taps (bigger or smaller) and pinches (zoom), NavigationScreen.MiniMap.
+        OwnCanvas(mini);
         Card(mini, s_T.surface, 46f, true);
         screen.miniMapFrame = mini;
         RectTransform window = Stretch("Window", mini, 8f, 8f, 8f, 8f);
-        Rounded(window, s_T.mapGround, 38f);
+        Rounded(window, s_T.mapGround, 38f).raycastTarget = true;   // FloorMap's touches land on it
         window.gameObject.AddComponent<Mask>().showMaskGraphic = true;
+        // Tap to make it big: an icon in the top left corner says so (it takes no taps itself).
+        RectTransform grow = Fixed("Grow", mini, new Vector2(0f, 1f), new Vector2(46f, -46f), new Vector2(56f, 56f));
+        Rounded(grow, Alpha(s_T.surface, 0.9f), 28f);
+        screen.miniMapIcon = TextIn(Stretch("Icon", grow), NavigationScreen.IconMiniMapGrow, s_Icons, 40,
+            s_T.onSurfaceVariant, TextAnchor.MiddleCenter);
         FloorMap miniMap = CreateFloorMap(window, 0.8f, false);
         miniMap.interactive = false;
         miniMap.routeWidth = 14f;

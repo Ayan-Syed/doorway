@@ -69,8 +69,10 @@ public partial class NavigationScreen
             case Step.Align:
                 if (place != null && place.doors.Count > 0)
                     StartFrom(place, NearestDoor(place, point), null);
+                else if (DoorNearTap(point, out PlanPlace near, out PlanDoor nearDoor))
+                    StartFrom(near, nearDoor, point);   // a hallway tap: the door nearest it (NavigationScreen.Realign)
                 else
-                    Snack("Tap the room or entrance you're at");
+                    Snack("Tap nearer where you are");
                 break;
         }
     }

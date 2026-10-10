@@ -39,6 +39,7 @@ public partial class NavigationScreen
         navigator.Load();
         map.SetPlan(Plan);
         miniMap.SetPlan(Plan);
+        InitMiniMap();   // tap to make it big, pinch to zoom (NavigationScreen.MiniMap)
         map.PlaceTapped += OnMapTapped;
         map.BuildingTapped += OnBuildingTapped;
         if (location != null)

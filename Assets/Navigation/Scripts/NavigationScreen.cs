@@ -124,6 +124,8 @@ public partial class NavigationScreen : MonoBehaviour
     public Text statusText;
     public RectTransform miniMapFrame;
     public FloorMap miniMap;
+    [Tooltip("The minimap's corner icon: tap to make it big, or small again (NavigationScreen.MiniMap).")]
+    public Text miniMapIcon;
     public Text etaText;
     public Text etaDetail;
     [Tooltip("How much of the route is walked: its anchorMax.x goes from 0 to 1.")]

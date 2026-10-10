@@ -109,6 +109,7 @@ public partial class NavigationScreen
     void ShowGuide()
     {
         Show(Step.Guide);
+        ResetMiniMap();   // each walk starts with it small, at its usual zoom
         m_DestinationTitle = PlaceStyle.Title(m_Destination);
         m_TowardText = $"Toward {m_DestinationTitle}";
         m_Side = null;
@@ -274,6 +275,7 @@ public partial class NavigationScreen
 
         // Heading-up round the user; the walked part of the route is cut off.
         // Haloed as wide as the estimate is unsure, and coloured like the big map's dot.
+        SizeMiniMap(instant);   // big or small, as last tapped
         miniMap.Follow(route, navigator.Progress, navigator.UserPosition, navigator.UserHeading, instant,
             sure ? 0f : Mathf.Max(m_Indoor.spread, MinAccuracyShown));
         miniMap.TintPuck(sure ? Theme.Current.primary : guidance == Guidance.Lost ? Theme.Current.onSurfaceVariant
@@ -362,9 +364,12 @@ public partial class NavigationScreen
     // Starts again from a door, for when the arrows no longer match the hallway.
     void Realign()
     {
+        // Where the walk had got to: the map opens on it, with its doors first (NavigationScreen.Realign).
+        if (navigator.IsGuiding)
+            m_RealignAt = navigator.UserPosition;
         navigator.Stop();
         ShowStart(m_Destination, false);
-        Snack("Go to the nearest door and pick it");
+        Snack("Tap where you are on the map, or pick the nearest door");
     }
 
     void OnRerouted()

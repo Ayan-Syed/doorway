@@ -303,6 +303,8 @@ public static partial class BuildNavigateScene
             Capture("6b-line-up-waiting", () => s.PreviewAlign(m_To, m_From, m_Door, false));
             Capture("7-guide", () => GuideAt(3f));
             Capture("8-guide-turn-now", () => GuideAt(FirstTurn() - 0.8f));
+            Capture("8d-guide-big-minimap", () => { GuideAt(3f); m_Screen.PreviewMiniMapBig(); });
+            Capture("8e-realign", () => { GuideAt(FirstTurn() + 3f); m_Screen.PreviewRealign(); });
             // The same turn coming up while the Localizer is unsure, then lost: no turn, a faint (then no) ribbon.
             Capture("8b-guide-unsure", () => GuideIndoorAt(FirstTurn() - 0.8f, LocalizerState.Converging, 6f));
             Capture("8c-guide-lost", () => GuideIndoorAt(FirstTurn() - 0.8f, LocalizerState.Lost, 10f));

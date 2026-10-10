@@ -114,13 +114,17 @@ public partial class NavigationScreen
 
         originField.gameObject.SetActive(true);
         originButton.gameObject.SetActive(false);
-        FillStartList(destination);
+        Vector2? walkedTo = TakeRealignSpot();   // re-aligning: where the walk had got to (NavigationScreen.Realign)
+        FillStartList(destination, walkedTo);
 
         Show(Step.Start);
         OpenSheet(startSheet, 1);
         map.ShowRoute(null);
         SetInsets(BottomOf(routeCard) + 8f, startSheet.stops[1]);
-        map.ShowAll(!Application.isPlaying);
+        if (walkedTo.HasValue)
+            FrameRealign(walkedTo.Value);
+        else
+            map.ShowAll(!Application.isPlaying);
         UpdateFinding();
         if (!m_AutoStart && location != null && location.Unavailable && !m_ToldNoLocation && Application.isPlaying)
         {
@@ -129,12 +133,15 @@ public partial class NavigationScreen
         }
     }
 
-    // "Near you" (the doors round the phone's location), then every door by kind. Built again only when the
-    // destination or the doors near you have changed since last time.
-    void FillStartList(PlanPlace destination)
+    // "Near you" (the doors round the phone's location, or round where the walk had got to when re-aligning), then
+    // every door, grouped as the directory is. Built again only when the destination or the doors near you have
+    // changed since last time.
+    void FillStartList(PlanPlace destination, Vector2? walkedTo = null)
     {
         m_NearYou.Clear();
-        if (location != null && location.HasFix)
+        if (walkedTo.HasValue)
+            NearWalk(walkedTo.Value, m_NearYou);
+        else if (location != null && location.HasFix)
         {
             Vector2 at = location.Position;
             m_NearYouAt = at;
@@ -149,7 +156,9 @@ public partial class NavigationScreen
             }
         }
 
-        bool same = m_StartListBuilt && destination == m_StartListFor && m_NearYou.Count == m_StartListNear.Count;
+        bool same = m_StartListBuilt && destination == m_StartListFor && m_NearYou.Count == m_StartListNear.Count
+                    && walkedTo.HasValue == m_StartListWalked;
+        m_StartListWalked = walkedTo.HasValue;
         for (int i = 0; same && i < m_NearYou.Count; i++)
             same = m_NearYou[i].door == m_StartListNear[i];
         if (same)
@@ -167,30 +176,26 @@ public partial class NavigationScreen
             var (place, door) = m_NearYou[i];
             m_StartListNear.Add(door);
             if (i == 0)
-                startList.AddSection("Near you");
+                startList.AddSection(walkedTo.HasValue ? "Near where you were" : "Near you");
             // The phone's location goes along (as it is when tapped), so "Not here?" offers the doors around it.
             startList.AddRow(place.kind, PlaceStyle.DoorTitle(place, door), place.detail,
                 () => StartFrom(place, door, m_NearYouAt));
         }
-        foreach (var (title, kinds) in Sections)
+        // Every door, in the directory's dropdowns: a row per door, and the doors of the rooms inside a room under
+        // that room's first door.
+        AddGrouped(startList, destination, (place, parent) =>
         {
-            bool header = false;
-            foreach (PlanPlace place in Places(kinds))
+            int first = -1;
+            foreach (PlanDoor door in place.doors)
             {
-                if (place == destination)
-                    continue;
-                foreach (PlanDoor door in place.doors)
-                {
-                    if (!header)
-                    {
-                        startList.AddSection(title);
-                        header = true;
-                    }
-                    startList.AddRow(place.kind, PlaceStyle.DoorTitle(place, door), place.detail,
-                        () => StartFrom(place, door, null));
-                }
+                PlanDoor at = door;
+                int row = startList.AddRow(place.kind, PlaceStyle.DoorTitle(place, at), place.detail,
+                    () => StartFrom(place, at, null), parent: parent);
+                if (first < 0)
+                    first = row;
             }
-        }
+            return first;
+        });
         startList.ResetSearch();
     }
 
