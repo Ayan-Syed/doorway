@@ -34,7 +34,7 @@ public static partial class BuildNavigateScene
         if (AssetImporter.GetAtPath(path) is TextureImporter importer)
             return importer;
         if (required)
-            Debug.LogError($"[Navigation] Missing {path}: make it with the scripts in Tools/ba1-floor1 (see the guide) and build again.");
+            Debug.LogError($"[Navigation] Missing {path}: make it with Tools/{s_Floor}/make_data.py and build again.");
         return null;
     }
 
@@ -93,7 +93,7 @@ public static partial class BuildNavigateScene
     // Reimported only if its settings are off: it's slow to compress.
     static Texture2D ImportBasemap(string theme)
     {
-        string path = $"{DataFolder}/ba1-floor1-map-{theme}.png";
+        string path = $"{DataFolder}/{s_Floor}-map-{theme}.png";
         TextureImporter importer = Importer(path, false);
         if (importer == null)
             return null;

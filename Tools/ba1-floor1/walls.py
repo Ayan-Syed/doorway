@@ -44,6 +44,12 @@ def main():
         outside = np.zeros(R.max() + 1, bool)
         for i, k in zip(d["ids"], d["kinds"]):
             outside[int(i)] = str(k) == "outside"
+    write(R, outside, os.path.join(graph.DATA_DIR, "ba1-floor1-walls.bytes"), graph.ORIGIN, graph.PX_PER_M)
+
+
+def write(R, outside, path, origin, px_per_m):
+    """The walls file for smoothed regions R (outside: a flag per region id), plan px -> metres by origin and
+    px_per_m. Tools/hec-floor1 uses it too."""
     inner, outer = boundaries(R, outside)
     # The wall bands as solid pixels, at the widths basemap.py draws its lines.
     solid = ((ndimage.distance_transform_edt(~inner) <= basemap.WALL_WIDTH / 2)
@@ -73,12 +79,12 @@ def main():
 
     pts = np.concatenate(rings).astype(np.float64)
     cm = np.empty_like(pts)
-    cm[:, 0] = (pts[:, 0] - graph.ORIGIN[0]) / graph.PX_PER_M * 100
-    cm[:, 1] = -(pts[:, 1] - graph.ORIGIN[1]) / graph.PX_PER_M * 100
+    cm[:, 0] = (pts[:, 0] - origin[0]) / px_per_m * 100
+    cm[:, 1] = -(pts[:, 1] - origin[1]) / px_per_m * 100
     cm = np.round(cm)
     assert np.abs(cm).max() < 32767, "floor too big for int16 centimetres"
     index = np.concatenate(tris)
-    with open(os.path.join(graph.DATA_DIR, "ba1-floor1-walls.bytes"), "wb") as f:
+    with open(path, "wb") as f:
         f.write(struct.pack("<4sHH", graph.WALLS_MAGIC, graph.FORMAT_VERSION, 0))
         f.write(struct.pack("<iii", len(pts), len(rings), len(index)))
         f.write(np.array([len(r) for r in rings], "<i4").tobytes())

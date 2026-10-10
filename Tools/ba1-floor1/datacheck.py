@@ -142,8 +142,9 @@ def off_grid(dx, dz):
     return min(a, 45.0 - a)
 
 
-def plan_problems(plan):
-    """What FloorPlan.Validate rejects, and the pipeline's own rules (doors on the wall grid, signs on doors)."""
+def plan_problems(plan, grid=True):
+    """What FloorPlan.Validate rejects, and the pipeline's own rules (doors on the wall grid, signs on doors).
+    grid=False drops the wall-grid rule, for a floor whose walls curve (HEC)."""
     out = []
     ids = [n["id"] for n in plan["nodes"]]
     if len(set(ids)) != len(ids):
@@ -167,7 +168,7 @@ def plan_problems(plan):
                 out.append(f"door {d['node']} of {p['id']} is no node")
             if abs(math.hypot(d["dx"], d["dz"]) - 1) > 0.01:
                 out.append(f"door {d['node']} of {p['id']} doesn't face a unit direction")
-            elif off_grid(d["dx"], d["dz"]) > GRID_TOLERANCE:
+            elif grid and off_grid(d["dx"], d["dz"]) > GRID_TOLERANCE:
                 out.append(f"door {d['node']} of {p['id']} is {off_grid(d['dx'], d['dz']):.1f} deg off the wall grid")
     for label in plan["labels"]:
         if not label.get("area", 0) > 0:
@@ -186,13 +187,15 @@ def plan_problems(plan):
     return out
 
 
-def problems():
-    """Every check, across every file. Empty when the data is sound."""
-    with open(graph.PLAN_JSON, encoding="utf-8") as f:
+def problems(floor="ba1-floor1", campus="ucf-campus", grid=True):
+    """Every check, across every file of a floor (Data/<floor>.json, -places, -walls, -walkable and its campus
+    map). Empty when the data is sound."""
+    data = lambda name: os.path.join(graph.DATA_DIR, name)
+    with open(data(f"{floor}.json"), encoding="utf-8") as f:
         plan = json.load(f)
-    out = plan_problems(plan)
+    out = plan_problems(plan, grid)
     try:
-        w, h, digest, cells = read_places(read(PLACES))
+        w, h, digest, cells = read_places(read(data(f"{floor}-places.bytes")))
         if digest != graph.place_id_hash([p["id"] for p in plan["places"]]):
             out.append("places.bytes was made for a different place list: run basemap.py")
         if cells.max() > len(plan["places"]):
@@ -200,37 +203,39 @@ def problems():
     except (OSError, ValueError) as e:
         out.append(str(e))
     try:
-        read_walls(read(WALLS))
+        read_walls(read(data(f"{floor}-walls.bytes")))
     except (OSError, ValueError) as e:
         out.append(str(e))
     try:
-        walk = read_walkable(read(WALKABLE))
+        walk = read_walkable(read(data(f"{floor}-walkable.bytes")))
         off = [n["id"] for n in plan["nodes"] if not walkable_at(walk, n["x"], n["z"])]
         if off:
             out.append(f"walkway nodes on unwalkable cells: {', '.join(off)}")
     except (OSError, ValueError) as e:
         out.append(str(e))
     try:
-        chunks, buildings = read_campus(read(CAMPUS_BYTES))
-        with open(CAMPUS_JSON, encoding="utf-8") as f:
+        chunks, buildings = read_campus(read(data(f"{campus}.bytes")))
+        with open(data(f"{campus}.json"), encoding="utf-8") as f:
             info = json.load(f)
         if len(buildings) != len(info["buildings"]):
-            out.append(f"ucf-campus: {len(buildings)} buildings but {len(info['buildings'])} names")
+            out.append(f"{campus}: {len(buildings)} buildings but {len(info['buildings'])} names")
         if sum(len(c[1]) for c in chunks) > 60000:
-            out.append("ucf-campus: over 60000 ground vertices, more than one uGUI mesh holds")
+            out.append(f"{campus}: over 60000 ground vertices, more than one uGUI mesh holds")
         if info.get("geo") != plan["geo"]:
-            out.append("ucf-campus was built with a different geo fit than ba1-floor1.json: run make_data.py --campus")
+            out.append(f"{campus} was built with a different geo fit than {floor}.json: run make_data.py --campus")
+        if [b["name"] for b in info["buildings"] if b.get("indoor")] != [plan["building"]]:
+            out.append(f"{campus} doesn't mark {plan['building']} (and only it) as the building with this floor")
     except (OSError, ValueError, KeyError) as e:
-        out.append(f"ucf-campus: {e}")
+        out.append(f"{campus}: {e}")
     return out
 
 
-def summary():
-    with open(graph.PLAN_JSON, encoding="utf-8") as f:
+def summary(floor="ba1-floor1"):
+    with open(os.path.join(graph.DATA_DIR, f"{floor}.json"), encoding="utf-8") as f:
         plan = json.load(f)
     kinds = collections.Counter(p["kind"] for p in plan["places"])
     doors = sum(len(p["doors"]) for p in plan["places"])
-    return (f"ba1-floor1.json: {len(plan['nodes'])} nodes, {len(plan['edges'])} edges, {len(plan['places'])} places "
+    return (f"{floor}.json: {len(plan['nodes'])} nodes, {len(plan['edges'])} edges, {len(plan['places'])} places "
             f"({', '.join(f'{v} {k}' for k, v in kinds.most_common())}), {doors} doors, {len(plan['labels'])} labels, "
             f"{len(plan.get('signs', []))} signs")
 

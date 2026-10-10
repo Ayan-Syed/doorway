@@ -9,8 +9,6 @@ using static UIBuild;
 // beside it, which positions the user indoors.
 public static partial class BuildNavigateScene
 {
-    const string WalkablePath = DataFolder + "/ba1-floor1-walkable.bytes";
-
     static Navigator CreateNavigator(TextAsset planJson, Transform arCamera, ARPlaneManager planes)
     {
         var go = new GameObject("Navigator");
@@ -37,7 +35,7 @@ public static partial class BuildNavigateScene
         var ribbon = ribbonGo.AddComponent<RouteRibbon>();   // builds its mesh at runtime
 
         navigator.planJson = planJson;
-        // Where a person can stand (Tools/ba1-floor1/walkable.py). Without it the app guides as before: no walls.
+        // Where a person can stand (Tools/ba1-floor1/walkable.py, or the floor's make_data.py). Without it the app guides as before: no walls.
         navigator.walkable = AssetDatabase.LoadAssetAtPath<TextAsset>(WalkablePath);
         if (navigator.walkable == null)
             Debug.LogWarning($"[Navigation] No {WalkablePath}: guiding without walls.");

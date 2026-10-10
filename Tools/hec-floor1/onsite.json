@@ -1,0 +1,90 @@
+{
+ "_about": [
+  "What only walking HEC floor 1 can tell. Edit, then run python make_data.py --campus.",
+  "numbers: the real room number on the door of each traced room (U ids are Knight Hacks' temporary ones; see check/rooms.png for where each is). Leave '' while unknown.",
+  "entrances: a point near each outside door, in the source drawing's pixels (FloorPlans/knighthacks-data/HEC-floor1-rooms-knighthacks-traced.json, 1400 x 800, y down), and where the evidence for it comes from."
+ ],
+ "numbers": {
+  "U01": "",
+  "U02": "",
+  "U03": "",
+  "U04": "",
+  "U05": "",
+  "U06": "",
+  "U07": "",
+  "U08": "",
+  "U09": "",
+  "U10": "",
+  "U11": "",
+  "U12": "",
+  "U13": "",
+  "U14": "",
+  "U15": "",
+  "U16": "",
+  "U17": "",
+  "U18": "",
+  "U19": "",
+  "U20": "",
+  "U21": "",
+  "U22": "",
+  "U23": "",
+  "U24": "",
+  "U25": "",
+  "U26": "",
+  "U27": "",
+  "U28": "",
+  "U29": "",
+  "U30": "",
+  "U31": "",
+  "U32": "",
+  "U33": "",
+  "U34": "",
+  "U35": "",
+  "U36": "",
+  "U37": "",
+  "U39": "",
+  "U40": ""
+ },
+ "entrances": [
+  {
+   "id": "exit-nw",
+   "name": "North-west entrance",
+   "detail": "End of the west hall",
+   "at": [
+    184,
+    212
+   ],
+   "evidence": "OpenStreetMap footway 309479001 ends at the wall here"
+  },
+  {
+   "id": "exit-n",
+   "name": "North entrance",
+   "detail": "Into the atrium",
+   "at": [
+    740,
+    66
+   ],
+   "evidence": "inferred: the outline's stepped vestibule at the top of the atrium; no footway in the OSM download"
+  },
+  {
+   "id": "exit-e",
+   "name": "East entrance",
+   "detail": "Into the atrium",
+   "at": [
+    855,
+    498
+   ],
+   "evidence": "OpenStreetMap footway 427528173 ends at the wall here, at a jog in the outline"
+  },
+  {
+   "id": "exit-ne",
+   "name": "North-east entrance",
+   "detail": "End of the 117 to 119 wing",
+   "at": [
+    1122,
+    205
+   ],
+   "evidence": "OpenStreetMap footway 1552986229 ends at the wall here; Knight Hacks' outside walk starts by it"
+  }
+ ]
+}

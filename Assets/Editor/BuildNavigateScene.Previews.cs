@@ -19,9 +19,9 @@ using Object = UnityEngine.Object;
 // The menu item does the same, then reopens the saved scene: the renders change the open one.
 public static partial class BuildNavigateScene
 {
-    // The walk the screens show: from room 113's door to room 121.
-    const string PreviewFrom = "113";
-    const string PreviewTo = "121";
+    // The walk the screens show: from the first room's door to the second. BA1: 113 to 121; HEC: 117 to 125.
+    static string PreviewFrom => s_Floor == "hec-floor1" ? "117" : "113";
+    static string PreviewTo => s_Floor == "hec-floor1" ? "125" : "121";
     // The phone held up at eye height, pitched down a little.
     const float PreviewEyeHeight = 1.4f;
     const float PreviewPitch = 22f;
@@ -37,7 +37,7 @@ public static partial class BuildNavigateScene
     {
         try
         {
-            if (!CreateScene(DefaultTheme, out NavigationScreen screen))
+            if (!PickFloor() || !CreateScene(DefaultTheme, out NavigationScreen screen))
             {
                 EditorApplication.Exit(1);
                 return;
@@ -55,7 +55,7 @@ public static partial class BuildNavigateScene
     [MenuItem("Navigation/Render Previews")]
     static void RenderPreviewsFromMenu()
     {
-        if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+        if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo() || !PickFloor())
             return;
         int failed = -1;
         try
@@ -77,6 +77,7 @@ public static partial class BuildNavigateScene
     // For the flow tests: the scene built as for an APK, its screen laid out as a phone's. Null if it can't be built.
     internal static NavigationScreen BuildForTests()
     {
+        UseFloor(DefaultFloor);              // the flow tests walk BA1's places
         if (!CreateScene(DefaultTheme, out NavigationScreen screen))
             return null;
         LayOutLikeAPhone(screen);

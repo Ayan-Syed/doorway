@@ -26,12 +26,14 @@ public static partial class BuildNavigateScene
     const string ApkPath = "Builds/BuildingNav-Navigate.apk";
     const string PreviewFolder = "Builds/Previews";
     const string DataFolder = "Assets/Navigation/Data";
-    const string PlanJsonPath = DataFolder + "/ba1-floor1.json";
-    const string PlanImagePath = DataFolder + "/ba1-floor1-plan.png";
-    const string PlaceMapPath = DataFolder + "/ba1-floor1-places.bytes";
-    const string WallsPath = DataFolder + "/ba1-floor1-walls.bytes";
-    const string CampusGeometryPath = DataFolder + "/ucf-campus.bytes";
-    const string CampusInfoPath = DataFolder + "/ucf-campus.json";
+    // The floor's files, Data/<floor>*, made by Tools/<floor>/make_data.py (BuildNavigateScene.Floors picks the floor).
+    static string PlanJsonPath => $"{DataFolder}/{s_Floor}.json";
+    static string PlanImagePath => $"{DataFolder}/{s_Floor}-plan.png";
+    static string PlaceMapPath => $"{DataFolder}/{s_Floor}-places.bytes";
+    static string WallsPath => $"{DataFolder}/{s_Floor}-walls.bytes";
+    static string WalkablePath => $"{DataFolder}/{s_Floor}-walkable.bytes";
+    static string CampusGeometryPath => $"{DataFolder}/{CampusName}.bytes";
+    static string CampusInfoPath => $"{DataFolder}/{CampusName}.json";
     const string MarkerFolder = UIFolder + "/Markers";
     const string MeshFolder = "Assets/Navigation/Meshes";
     const string ProductName = "Doorway";
@@ -79,15 +81,15 @@ public static partial class BuildNavigateScene
     [MenuItem("Navigation/Build Navigate Scene")]
     public static void Build()
     {
-        if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+        if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo() || !PickFloor())
             return;
         if (CreateScene(DefaultTheme, out _))
             EditorUtility.DisplayDialog("Navigation",
-                $"Built {ScenePath} and set it as the only scene in Build Settings.", "OK");
+                $"Built {ScenePath} for {s_Floor} and set it as the only scene in Build Settings.", "OK");
     }
 
     // Unity.exe -batchmode -projectPath <project> -buildTarget Android -executeMethod BuildNavigateScene.BuildApk
-    //     [-theme paper] [-versionCode N]
+    //     [-theme paper] [-floor hec-floor1] [-versionCode N]
     // (No -quit needed: this exits by itself, 0 on success and 1 on any failure.) Signing: see ReleaseSettings.
     public static void BuildApk()
     {
@@ -95,7 +97,7 @@ public static partial class BuildNavigateScene
         {
             // A fresh clone has Unity's defaults (no ARCore, com.DefaultCompany, Mono): set ours first.
             ProjectSetup.Apply();
-            if (!ValidatePlan() || !CreateScene(ThemeArgument(), out _))
+            if (!PickFloor() || !ValidatePlan() || !CreateScene(ThemeArgument(), out _))
             {
                 EditorApplication.Exit(1);
                 return;
@@ -122,15 +124,18 @@ public static partial class BuildNavigateScene
     }
 
     // -theme <name> on the command line picks the day theme; iris without it. The night theme is always dusk.
-    static string ThemeArgument()
+    static string ThemeArgument() => Argument("-theme") ?? DefaultTheme;
+
+    // The value after a command-line flag, or null.
+    static string Argument(string flag)
     {
         string[] args = Environment.GetCommandLineArgs();
         for (int i = 0; i < args.Length - 1; i++)
         {
-            if (args[i] == "-theme")
+            if (args[i] == flag)
                 return args[i + 1];
         }
-        return DefaultTheme;
+        return null;
     }
 
     // Bad data (a node that isn't there, a place grid for other places, a truncated walls or campus file...) would
@@ -152,7 +157,7 @@ public static partial class BuildNavigateScene
         string problem = DataProblem(json);
         if (problem == null)
             return true;
-        Debug.LogError($"[Navigation] Bad app data: {problem} Fix the data (python Tools/ba1-floor1/make_data.py " +
+        Debug.LogError($"[Navigation] Bad app data: {problem} Fix the data (python Tools/{s_Floor}/make_data.py " +
                        "--campus) and build again; not building.");
         return false;
     }
