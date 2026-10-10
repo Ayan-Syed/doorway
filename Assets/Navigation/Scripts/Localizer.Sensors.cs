@@ -9,10 +9,12 @@ using UnityEngine.XR.ARSubsystems;
 // Depth API), the walls ARCore finds, plates read, the compass and steps: each into the engine and the walk log.
 public partial class Localizer
 {
-    // Depth: every 8th pixel; points 0.4 to 6 m from the camera and 0.3 to 2.2 m above the floor (walls, not floor,
-    // ceiling or the user's feet); raw depth's confidence (0-255) at least this.
-    const int DepthStride = 8;
-    const float MinRange = 0.4f, MaxRange = 6f, MinHeight = 0.3f, MaxHeight = 2.2f;
+    // Depth: a grid of about DepthColumns across the depth image (every 3rd or 4th pixel of ARCore's 160-pixel-wide
+    // one: the first field walk's every 8th left a median of 7 points a scan); points 0.4 to 6 m from the camera and
+    // MinHeight to MaxHeight above the floor (walls, not floor, ceiling or the user's feet); raw depth's confidence
+    // (0-255) at least MinDepthConfidence.
+    const int DepthColumns = 48;
+    const float MinRange = 0.4f, MaxRange = 6f, MinHeight = 0.4f, MaxHeight = 2f;
     const byte MinDepthConfidence = 100;
     const float MinPointConfidence = 0.3f;
     // The camera image's rotation to upright: a quarter turn for the back camera with the app held in portrait (the
@@ -20,8 +22,9 @@ public partial class Localizer
     const int ImageRotation = 90;
     // Seconds after depth was asked for, before its absence counts (the subsystem takes a moment to start).
     const float DepthStartSeconds = 3f;
-    // A wall ARCore hasn't updated for this long isn't used (it may be out of date, or from the far side).
-    const float WallSeenSeconds = 10f;
+    // A wall ARCore hasn't updated for this long isn't used (it may be out of date, or from the far side). Long: ARCore
+    // stops updating a wall once it's settled, and at 10 s the first field walk lost most of its walls that way.
+    const float WallSeenSeconds = 60f;
     // Digit height samples: the plate's distance from the estimate, while Localized, the nearest sign with that text
     // being the only one within this; a median of the last ones (robust to the odd wrong read).
     const float DigitUnique = 8f;
@@ -120,24 +123,56 @@ public partial class Localizer
                 Vector2 focal = Vector2.Scale(intrinsics.focalLength, scale);
                 Vector2 principal = Vector2.Scale(intrinsics.principalPoint, scale);
                 Matrix4x4 pose = navigator.arCamera.localToWorldMatrix;
-                float floor = navigator.FloorY;
-                for (int y = DepthStride / 2; y < h; y += DepthStride)
+                float cameraY = navigator.arCamera.position.y;
+                int stride = Mathf.Max(2, Mathf.RoundToInt(w / (float)DepthColumns));
+                // First the points in range, then the floor among them, then the walls above it.
+                int found = 0;
+                for (int y = stride / 2; y < h; y += stride)
                 {
-                    for (int x = DepthStride / 2; x < w; x += DepthStride)
+                    for (int x = stride / 2; x < w; x += stride)
                     {
+                        m_DepthCounts[0]++;
                         int i = y * w + x;
                         float z = m_Depth[i];
-                        if (z <= 0f || confident && m_DepthConfidence[i] < MinDepthConfidence)
+                        if (z <= 0f)
+                        {
+                            m_DepthCounts[1]++;
                             continue;
+                        }
+                        if (confident && m_DepthConfidence[i] < MinDepthConfidence)
+                        {
+                            m_DepthCounts[2]++;
+                            continue;
+                        }
                         Vector3 ray = SignReader.ImageToCameraDirection(new Vector2(x, y), focal, principal, ImageRotation);
                         Vector3 local = ray * (z / ray.z);   // depth is along the optical axis
                         float range = local.magnitude;
                         if (range < MinRange || range > MaxRange)
+                        {
+                            m_DepthCounts[3]++;
                             continue;
-                        Vector3 world = pose.MultiplyPoint3x4(local);
-                        float height = world.y - floor;
-                        if (height < MinHeight || height > MaxHeight)
-                            continue;
+                        }
+                        if (found == m_DepthPoints.Length)
+                            Array.Resize(ref m_DepthPoints, found * 2);
+                        m_DepthPoints[found++] = pose.MultiplyPoint3x4(local);
+                    }
+                }
+                float floor = DepthFloor(t, cameraY, found);
+                for (int k = 0; k < found; k++)
+                {
+                    Vector3 world = m_DepthPoints[k];
+                    float height = world.y - floor;
+                    if (height < MinHeight)
+                    {
+                        m_DepthCounts[4]++;
+                    }
+                    else if (height > MaxHeight)
+                    {
+                        m_DepthCounts[5]++;
+                    }
+                    else
+                    {
+                        m_DepthCounts[6]++;
                         m_Buffer.Add(t, new Vector2(world.x, world.z));
                     }
                 }
@@ -148,6 +183,51 @@ public partial class Localizer
             Debug.LogWarning($"[Navigation] Depth scan: {e.Message}");
         }
     }
+
+    // The floor's height under the depth points: the most crowded FloorBin-high layer from FloorDropMin to
+    // FloorDropMax below the camera, if it holds FloorShare of them (the floor seen ahead, as a phone held to read
+    // its screen sees it); else the last one found within FloorKeepSeconds; else Navigator's (a floor plane, or a
+    // guess from a typical eye height). The guess can be 30 cm out, and then the floor ahead passes for a wall: in
+    // the first field walk most of the points kept were floor a metre or two ahead.
+    float DepthFloor(double t, float cameraY, int count)
+    {
+        Array.Clear(m_FloorBins, 0, m_FloorBins.Length);
+        for (int k = 0; k < count; k++)
+        {
+            int bin = Mathf.FloorToInt((cameraY - m_DepthPoints[k].y - FloorDropMin) / FloorBin);
+            if (bin >= 0 && bin < m_FloorBins.Length)
+                m_FloorBins[bin]++;
+        }
+        int best = 0;
+        for (int b = 1; b < m_FloorBins.Length; b++)
+            if (m_FloorBins[b] > m_FloorBins[best])
+                best = b;
+        if (count > 0 && m_FloorBins[best] >= Mathf.Max(FloorMinPoints, FloorShare * count))
+        {
+            float drop = FloorDropMin + (best + 0.5f) * FloorBin;
+            m_FloorDrop = m_FloorAt < 0 ? drop : Mathf.Lerp(m_FloorDrop, drop, FloorLearning);
+            m_FloorAt = t;
+        }
+        if (m_FloorAt >= 0 && t - m_FloorAt <= FloorKeepSeconds)
+        {
+            m_FloorSource = 'd';
+            return cameraY - m_FloorDrop;
+        }
+        m_FloorSource = 'n';
+        return navigator.FloorY;
+    }
+
+    const float FloorDropMin = 0.8f, FloorDropMax = 2.3f, FloorBin = 0.05f, FloorShare = 0.1f, FloorLearning = 0.3f;
+    const int FloorMinPoints = 10;
+    const double FloorKeepSeconds = 5.0;
+    readonly int[] m_FloorBins = new int[30];   // (FloorDropMax - FloorDropMin) / FloorBin; from 0.8 m: not a table
+    Vector3[] m_DepthPoints = new Vector3[1024];
+    float m_FloorDrop;
+    double m_FloorAt = -1;
+    char m_FloorSource = 'n';
+    // Depth samples since the last D row: taken, no depth, low confidence, out of range, below MinHeight (floor),
+    // above MaxHeight (ceiling), kept.
+    readonly int[] m_DepthCounts = new int[7];
 
     // The depth image into metres (DepthFloat32 metres, or DepthUint16 millimetres).
     bool ReadDepth(XRCpuImage depth, int w, int h)
@@ -243,7 +323,10 @@ public partial class Localizer
             }
             m_Log.EndRow();
         }
-        if (!m_Engine.Scan(t, m_Scan, n) || m_Log == null)
+        m_Watch.Start();   // the engine's own time only (Measure's budget), not the log's
+        bool weighed = m_Engine.Scan(t, m_Scan, n);
+        m_Watch.Stop();
+        if (!weighed || m_Log == null)
             return;
         ScanMatcher matcher = m_Engine.ScanMatcher;
         m_Log.Row('D', t);
@@ -251,6 +334,14 @@ public partial class Localizer
         m_Log.Add(matcher.LastPoints);
         m_Log.Add(matcher.LastBestMean, 3);
         m_Log.Add(matcher.LastHitShare, 2);
+        // Where the depth samples went since the last row, and the floor the heights were measured from: its drop
+        // below the camera, d (from the depth) or n (Navigator's: a floor plane or a guess).
+        foreach (int count in m_DepthCounts)
+            m_Log.Add(count);
+        m_Log.Add(navigator.arCamera.position.y - (m_FloorSource == 'd' ? navigator.arCamera.position.y - m_FloorDrop
+            : navigator.FloorY), 2);
+        m_Log.Add(m_FloorSource.ToString());
+        Array.Clear(m_DepthCounts, 0, m_DepthCounts.Length);
         m_Log.EndRow();
     }
 
@@ -310,7 +401,9 @@ public partial class Localizer
             }
             m_Log.EndRow();
         }
+        m_Watch.Start();
         m_Engine.Walls(t, m_Walls);
+        m_Watch.Stop();
     }
 
     // A plate read (SignReader, or Navigator passing one on): flattened to a bearing and range from the camera where
@@ -341,7 +434,11 @@ public partial class Localizer
             m_Log.Add(s.distance, 3);
             m_Log.EndRow();
         }
-        if (State == LocalizerState.Localized && !s.distanceMeasured)
+        // The plates' digit height: from a measured distance (depth or a wall plane) directly; else from the estimate
+        // while Localized. (Measured only, the first field walk never calibrated: 39 of its 43 reads were measured.)
+        if (s.distanceMeasured)
+            AddDigitSample(s.digitPixels * s.distance / s.focalPixels);
+        else if (State == LocalizerState.Localized)
             CalibrateDigits(s, level);
         m_Engine.Sighting(t, s.text, camera, bearing, range, sigma);
         Publish();
@@ -378,6 +475,14 @@ public partial class Localizer
         float flat = Vector2.Distance(world, new Vector2(s.cameraPosition.x, s.cameraPosition.z));
         float digit = s.digitPixels * (flat / level) / s.focalPixels;
         if (digit < MinDigit || digit > MaxDigit)
+            return;
+        AddDigitSample(digit);
+    }
+
+    // One digit height sample (metres) into the running median that SignReader ranges plates by.
+    void AddDigitSample(float digit)
+    {
+        if (!(digit >= MinDigit && digit <= MaxDigit))
             return;
         m_DigitHeights.Add(digit);
         if (m_DigitHeights.Count > DigitSamples)

@@ -20,7 +20,7 @@ public class CampusData
         public float y;
         public float area;
         public float height;
-        public bool indoor;
+        public bool indoor;            // it has an indoor map (a floor in the app)
 
         [NonSerialized] public int index;
         // Every ring one after another (outer anticlockwise, holes clockwise), metres.
@@ -95,8 +95,9 @@ public class CampusData
 
     public readonly Chunk[] chunks;
     public readonly Building[] buildings;
-    // The building with the indoor map, or null.
-    public readonly Building indoor;
+    // The building whose floor the app has loaded (FloorMap.SetCampus sets it from the plan's building), or null.
+    // At load, the first with an indoor map.
+    public Building indoor;
     // Where the map opens: the middle of campus.
     public readonly Vector2 middle;
     public readonly Rect extent;

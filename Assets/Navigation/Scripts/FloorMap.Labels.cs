@@ -211,7 +211,7 @@ public partial class FloorMap
             CampusData.Building building = label.building;
             Vector2 at = ToWindow(label.position) + new Vector2(0f, Height(building) * lift);
             // The floor's building is named only while you're outside it.
-            bool fits = (building.indoor ? m_Indoor < 0.5f : Mathf.Sqrt(label.area) * scale >= BuildingLabelRoom)
+            bool fits = (building == m_Campus.indoor ? m_Indoor < 0.5f : Mathf.Sqrt(label.area) * scale >= BuildingLabelRoom)
                 && OnScreen(at, half);
             if (!fits)
             {
@@ -224,7 +224,7 @@ public partial class FloorMap
                 MakeBuildingLabel(label);
 
             bool shown = Claim(at, label.size);
-            if (!shown && building.indoor)
+            if (!shown && building == m_Campus.indoor)
             {
                 // The floor's building is the one to find: when something's on its spot (the puck, say), its name
                 // goes just below that, or above.

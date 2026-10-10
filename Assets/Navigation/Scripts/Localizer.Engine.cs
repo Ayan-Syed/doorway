@@ -71,6 +71,8 @@ public sealed partial class LocalizerEngine
     // Plates: the likelihood left to a particle that couldn't have seen one (it may be a misread or a poster), and how
     // long a contradicting plate waits for a second one.
     const float LostSplit = 0.5f;
+    const float PlateRepeatSeconds = 8f, PlateRepeatMove = 1.5f;
+    readonly Dictionary<string, (double t, Vector2 camera)> m_PlateSeen = new Dictionary<string, (double, Vector2)>();
 
     const float PlateOutlier = 0.01f, ContradictionSeconds = 10f, AgreeSlack = 1.5f;
     // The scale term (see Measure): the least scale spread believed, the most it may be while sure (metres), and
@@ -456,6 +458,15 @@ public sealed partial class LocalizerEngine
             return Sighted.Ignored;
         if (string.IsNullOrEmpty(text) || !m_Signs.TryGetValue(text.Trim(), out var sign) || !(worldRange > 0f))
             return Sighted.Unknown;
+        // The same plate read again from about the same place is the same evidence, not more of it: the reader reads
+        // a plate in view every half second or so (the first field walk: ten reads of one plate in eight seconds,
+        // each pulling the cloud's heading further onto it). Weighed again only after PlateRepeatSeconds or once the
+        // camera has moved PlateRepeatMove.
+        string plate = text.Trim();
+        if (m_PlateSeen.TryGetValue(plate, out var seen) && t - seen.t < PlateRepeatSeconds &&
+            Vector2.Distance(camera, seen.camera) < PlateRepeatMove)
+            return Sighted.Ignored;
+        m_PlateSeen[plate] = (t, camera);
         // From the camera where the filter last moved: the sign stays put while the user walks on, so a late
         // sighting is as good as a fresh one.
         Vector2 toSign = camera + PositionFilter.HeadingVector(worldBearing) * worldRange - m_Filter.Camera;

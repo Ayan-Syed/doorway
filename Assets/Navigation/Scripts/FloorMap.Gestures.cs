@@ -137,7 +137,7 @@ public partial class FloorMap
         {
             CampusData.Building building = BuildingAt(at);
             // The floor's own building, while its floor shows, is a tap on the floor.
-            if (building != null && !(building.indoor && m_Indoor > 0.5f))
+            if (building != null && !(building == m_Campus?.indoor && m_Indoor > 0.5f))
             {
                 BuildingTapped?.Invoke(building);
                 return;

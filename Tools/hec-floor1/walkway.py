@@ -21,6 +21,7 @@ SPUR = 2.0            # metres: dead ends shorter than this are the thinning's w
 SIMPLIFY = 0.3        # metres a simplified hallway line may stray from the centre line
 DOOR_OUT = 0.8        # metres from the wall to the door spot, at most
 SNAP = 0.4            # metres: a door joins the graph at an existing point this close rather than splitting a link
+NEAR_LINK = 2.5       # metres: a door spot is also linked to every hallway point this close that it can see
 SHORTCUT = 6.0        # metres: hallway points this close, with clear floor between them...
 DETOUR = 1.3          # ...whose way round the graph is this many times longer, get a link straight across
 CLEARANCE = 0.3       # metres of clear floor a shortcut keeps on each side
@@ -223,8 +224,28 @@ def hallway_graph(frame, R):
         for u, v in zip(chain, chain[1:]):
             if u != v:
                 g.edges.append((u, v))
+    join_pieces(g, R)
     shortcuts(g, R)
     return g, hall
+
+
+def join_pieces(g, R):
+    """The centre lines can break where a hallway pinches: each piece but the largest is joined to the rest by the
+    shortest clear line between their points, or dropped if there is none."""
+    import graph as ba1
+    while True:
+        pieces = sorted(ba1.components(g.nodes, g.edges), key=len)
+        if len(pieces) == 1:
+            return
+        piece, rest = pieces[0], [n for p in pieces[1:] for n in p]
+        pairs = sorted((math.hypot(*(np.array(g.nodes[a]) - g.nodes[b])), a, b) for a in piece for b in rest)
+        link = next(((a, b) for _, a, b in pairs if clear(R, g.nodes[a], g.nodes[b])), None)
+        if link:
+            g.edges.append(link)
+        else:
+            for n in piece:
+                del g.nodes[n]
+            g.edges = [e for e in g.edges if e[0] not in piece and e[1] not in piece]
 
 
 def shortcuts(g, R):
@@ -362,5 +383,11 @@ def join(g, R, point_name, spot):
             g.edges[k] = (a, hall)
             g.edges.append((hall, b))
         g.edges.append((point_name, hall))
+        # Also every other hallway point close by in plain sight, as BA1's doors join the points either side of
+        # them: a route then comes straight in, and doesn't run on to the join and double back.
+        for other, xy in list(g.nodes.items()):
+            if (other != hall and other != point_name and other[0] in "hbj"
+                    and math.hypot(*(np.array(xy) - spot)) < NEAR_LINK * hec.PX_PER_M and clear(R, spot, xy)):
+                g.edges.append((point_name, other))
         return hall
     return None

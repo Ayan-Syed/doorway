@@ -16,16 +16,35 @@ public partial class Navigator
     readonly List<Vector2> m_Landmarks = new List<Vector2>();
     readonly List<Vector2> m_Normals = new List<Vector2>();
 
-    // A new route from where the user is, after RerouteSeconds of tracked time more than RerouteDistance off it.
-    // Any frame back within it, or without tracking, starts the wait again: no rerouting from a lost pose.
+    // Off the route this long (tracked, sure of the position) before rerouting. In the field a 1.5 s wait rerouted
+    // three times in twenty seconds on a 1-2 m error: the route is worth more than a quick reroute.
+    const float SureRerouteSeconds = 3f;
+
+    // A new route from where the user is, after SureRerouteSeconds of tracked time more than RerouteDistance off it,
+    // sure of the position all the while. Any frame back within it, untracked, or unsure starts the wait again.
     void CheckOffRoute()
     {
-        m_OffRouteTime = OffRoute > RerouteDistance && IsTracking ? m_OffRouteTime + Time.deltaTime : 0f;
-        if (m_OffRouteTime < RerouteSeconds)
+        bool sure = SureOfPosition();
+        if (sure && localizer != null && localizer.Indoors)
+        {
+            NextStep(out float toTurn, out _, out _);
+            sure = MayReroute(localizer.State, localizer.Spread, localizer.AlongSpread, toTurn);
+        }
+        m_OffRouteTime = OffRoute > RerouteDistance && IsTracking && sure ? m_OffRouteTime + Time.deltaTime : 0f;
+        if (m_OffRouteTime < SureRerouteSeconds)
             return;
         Route route = m_Router.FindRoute(UserPosition, Route.place);
         if (route == null)
             return;   // the timer stays up, so it tries again next frame
+        if (SameStart(Route, Progress, route))
+        {
+            // The same way on from here: the old route stands (the user is on it further along), quietly.
+            Progress = Route.Project(UserPosition, Progress, out float along);
+            OffRoute = along;
+            m_OffRouteTime = 0f;
+            m_Log?.Note("reroute kept");
+            return;
+        }
         Route = route;
         Progress = Route.Project(UserPosition, 0f, out float offRoute);
         OffRoute = offRoute;

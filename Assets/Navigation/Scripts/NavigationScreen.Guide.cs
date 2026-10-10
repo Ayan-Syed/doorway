@@ -229,7 +229,7 @@ public partial class NavigationScreen
             SetStatus(RealignStatus, PlaceStyle.Bad);
         else if (navigator.TrackingLost)
             SetStatus(TrackingLostStatus, PlaceStyle.Bad);
-        else if (navigator.IsOffRoute)
+        else if (navigator.IsOffRoute && turnSure)   // "head back to the arrows" only when sure it is off them
             SetStatus(OffRouteStatus, PlaceStyle.Waiting);
         else
             SetStatus(null, default);

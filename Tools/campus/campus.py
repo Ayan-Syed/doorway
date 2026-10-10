@@ -1,13 +1,14 @@
-"""UCF's campus from OpenStreetMap, in a floor's plan metres (BA1 floor 1's unless --floor), for the app's outdoor map.
+"""UCF's campus from OpenStreetMap, in the floors' plan metres (BA1 floor 1's, which every floor shares), for the
+app's outdoor map.
 
 Projects the Overpass download with the floor plan's geo fit, sorts it into ground layers (grass, trees,
 water, parking, paths, roads), merges and triangulates each layer, and keeps every building's outline,
-roof triangles, height and label spot. The floor's building (the plan's "building", OSM's name) is marked indoor.
-Run from anywhere: python campus.py [osm/ucf.json] [--floor hec-floor1]
-  -> Assets/Navigation/Data/ucf-campus.bytes and ucf-campus.json (written at the end of main(), read by CampusData.cs);
-     for another floor, ucf-campus-<floor>.bytes and .json.
-Needs Assets/Navigation/Data/<floor>.json (its building and geo block): run the floor pipeline first. The geo block
-used is copied into the .json, so the app's data check can tell when the campus needs building again.
+roof triangles, height and label spot. Every building with a floor plan in Data (its "building", OSM's name) is
+marked indoor.
+Run from anywhere: python campus.py [osm/ucf.json]
+  -> Assets/Navigation/Data/ucf-campus.bytes and ucf-campus.json (written at the end of main(), read by CampusData.cs).
+Needs Assets/Navigation/Data/ba1-floor1.json (its geo block): run the floor pipelines first. The geo block used is
+copied into ucf-campus.json, so the app's data check can tell when the campus needs building again.
 ucf-campus.bytes (little-endian): "DWCP", uint16 version (1), uint16 0; int32 chunk count, then per chunk int32
 layer, vertex count, index count, int16 x, y decimetres per vertex, uint16 indices; int32 building count, then per
 building int32 height (dm), ring count, index count, int32 points per ring, int16 x, y dm, uint16 indices.
@@ -27,7 +28,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 BOX = os.path.normpath(os.path.join(HERE, "..", ".."))
 OSM = os.path.join(HERE, "osm", "ucf.json")
 DATA = os.path.join(BOX, "Assets", "Navigation", "Data")
-FLOOR = "ba1-floor1"                               # the floor the app ships unless built for another
+PLAN = os.path.join(DATA, "ba1-floor1.json")
+OUT = os.path.join(DATA, "ucf-campus")
 BBOX = (28.5880, -81.2120, 28.6130, -81.1860)     # south, west, north, east, as fetched (osm/ucf.overpassql)
 EARTH_RADIUS = 6378137.0                           # the same as PlanGeo in FloorPlan.cs
 
@@ -168,28 +170,27 @@ def ground_layer(tags):
     return None
 
 
-def outputs(floor):
-    """(plan JSON, output path without extension) for a floor: BA1's campus keeps its old name."""
-    out = "ucf-campus" if floor == FLOOR else f"ucf-campus-{floor}"
-    return os.path.join(DATA, f"{floor}.json"), os.path.join(DATA, out)
+def floor_buildings(geo_block):
+    """The buildings with a floor plan in Data (a JSON with nodes) in this geo frame: the campus marks them indoor."""
+    names = set()
+    for name in sorted(os.listdir(DATA)):
+        if name.endswith(".json"):
+            with open(os.path.join(DATA, name), encoding="utf-8") as f:
+                plan = json.load(f)
+            if "nodes" in plan and plan.get("geo") == geo_block:
+                names.add(plan["building"])
+    return names
 
 
 def main():
-    args = sys.argv[1:]
-    floor = FLOOR
-    if "--floor" in args:
-        at = args.index("--floor")
-        floor = args[at + 1]
-        del args[at:at + 2]
-    osm = args[0] if args else OSM
-    plan_path, out = outputs(floor)
+    osm = sys.argv[1] if len(sys.argv) > 1 else OSM
     for path, how in ((osm, "POST osm/ucf.overpassql to https://overpass-api.de/api/interpreter and save the result there"),
-                      (plan_path, f"run Tools/{floor}/make_data.py first: its geo block places the campus")):
+                      (PLAN, "run Tools/ba1-floor1/make_data.py first: its geo block places the campus")):
         if not os.path.exists(path):
             sys.exit(f"Missing {path}: {how}")
-    with open(plan_path, encoding="utf-8") as f:
-        plan = json.load(f)
-    geo_block, indoor = plan["geo"], plan["building"]
+    with open(PLAN, encoding="utf-8") as f:
+        geo_block = json.load(f)["geo"]
+    indoor = floor_buildings(geo_block)
     geo = Geo(geo_block)
     with open(osm, encoding="utf-8") as f:
         elements = json.load(f)["elements"]
@@ -285,7 +286,7 @@ def main():
             height = height_of(tags, name)
             spot = polylabel(p, 0.5)       # the point deepest inside: better than the centroid for L and U shapes
             infos.append({"name": name, "x": round(spot.x, 2), "y": round(spot.y, 2), "area": round(p.area, 1),
-                          "height": round(height, 1), "indoor": name == indoor})
+                          "height": round(height, 1), "indoor": name in indoor})
             records.append((height, rings, tri))
             name = ""                      # one label for a building in pieces
 
@@ -295,7 +296,7 @@ def main():
     middle = np.concatenate(ring).mean(axis=0)
     lo, hi = frame.bounds[:2], frame.bounds[2:]
 
-    with open(out + ".bytes", "wb") as f:
+    with open(OUT + ".bytes", "wb") as f:
         f.write(struct.pack("<4sHH", MAGIC, VERSION, 0))
         f.write(struct.pack("<i", len(chunks)))
         for layer, verts, tri in chunks:
@@ -313,7 +314,7 @@ def main():
             "middle": [round(float(middle[0]), 1), round(float(middle[1]), 1)],
             "min": [round(lo[0], 1), round(lo[1], 1)], "max": [round(hi[0], 1), round(hi[1], 1)],
             "geo": geo_block, "buildings": infos}
-    with open(out + ".json", "w", encoding="utf-8") as f:
+    with open(OUT + ".json", "w", encoding="utf-8") as f:
         json.dump(info, f, ensure_ascii=False, separators=(",", ":"))
     print(f"{len(chunks)} chunks, {sum(len(c[1]) for c in chunks)} ground vertices; {len(records)} buildings, "
           f"{sum(len(r) for _, rings, _ in records for r in rings)} outline points; "

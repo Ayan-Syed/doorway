@@ -160,7 +160,7 @@ public static partial class ReplayEvaluator
                 signWhileLost = double.Parse(line.Split(',')[1], CultureInfo.InvariantCulture);
             if (!feeder.Feed(line, out string[] c, out double t))
                 continue;
-            if (c[0] == "r")
+            if (c[0] == "w")   // the guided route (stress walks only)
             {
                 int k = int.Parse(c[2], CultureInfo.InvariantCulture);
                 var points = new Vector2[k];

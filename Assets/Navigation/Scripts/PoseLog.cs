@@ -37,7 +37,10 @@ using UnityEngine;
 //   q,t,max                              the particle cap, lowered for the time budget
 //   c,t,door,x,z                         a checkpoint: the user says they're at this door (the truth)
 // and its outputs, for reading but not replayed:
-//   r,t,state,x,z,heading,spread,confidence,particles,walls   D,t,source,points,bestMean,hitShare,ms
+//   r,t,state,x,z,heading,spread,confidence,particles,walls
+//   D,t,source,points,bestMean,hitShare,samples,noDepth,lowConfidence,outOfRange,floor,ceiling,kept,floorDrop,floorFrom
+//                                        a scan's fit, and where the depth samples since the last D went (floorFrom:
+//                                        d the depth's own floor, n Navigator's)
 //   g,t,x,z,accuracy (GPS)               e,t,what (state changes, routes, sources)
 public sealed class PoseLog
 {

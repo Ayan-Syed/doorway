@@ -38,6 +38,14 @@ public class WallMesh : MaskableGraphic
         SetVerticesDirty();
     }
 
+    // Another floor's walls: read afresh on the next draw.
+    public void SetWalls(TextAsset outlines)
+    {
+        walls = outlines;
+        m_Points = null;
+        SetVerticesDirty();
+    }
+
 #if UNITY_EDITOR
     protected override void OnValidate()
     {

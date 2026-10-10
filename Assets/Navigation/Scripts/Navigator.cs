@@ -272,6 +272,21 @@ public partial class Navigator : MonoBehaviour
         }
     }
 
+    // Another floor: any walk stops, then its plan and walkable map load in place of these.
+    public void SetFloor(TextAsset plan, TextAsset walkableMap)
+    {
+        if (plan == planJson && Plan != null)
+            return;
+        Stop();
+        planJson = plan;
+        walkable = walkableMap;
+        Plan = null;
+        Walkable = null;
+        m_Router = null;
+        m_SignTexts.Clear();
+        Load();
+    }
+
     public Route PlanRoute(PlanDoor from, PlanPlace to)
     {
         Load();

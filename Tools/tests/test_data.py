@@ -152,4 +152,5 @@ def test_campus(plan):
         info = json.load(f)
     assert info["geo"] == plan["geo"]
     assert len(buildings) == len(info["buildings"])
-    assert [b["name"] for b in info["buildings"] if b["indoor"]] == [plan["building"]]
+    # Every building with a floor plan (all in BA1's plan metres) is marked indoor.
+    assert sorted(b["name"] for b in info["buildings"] if b["indoor"]) == [plan["building"], "L3Harris Engineering Center"]

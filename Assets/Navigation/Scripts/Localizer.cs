@@ -425,13 +425,12 @@ public partial class Localizer : MonoBehaviour
     // Five times a second: the scan and the walls into the engine, timed against the budget, and the outputs logged.
     void Measure(double t, bool tracking)
     {
-        m_Watch.Restart();
+        m_Watch.Reset();   // MatchScan and MatchWalls time the engine's calls only (logging a scan isn't its cost)
         if (tracking)
         {
             MatchScan(t);
             MatchWalls(t);
         }
-        m_Watch.Stop();
         float ms = (float)m_Watch.Elapsed.TotalMilliseconds;
         // Over budget a few times in a row: fewer particles from now on (logged, so a replay does the same).
         m_OverBudget = ms > BudgetMilliseconds ? m_OverBudget + 1 : 0;
