@@ -165,3 +165,39 @@ def test_upload_takes_only_doorway_logs(tmp_path, capsys):
     assert [os.path.basename(p) for p, _ in others] == ["notes.csv"]
     assert upload.main([str(tmp_path), "--dry-run", "--schema", "s", "--volume", "v"]) == 0
     assert "/Volumes/workspace/s/v/walks/20261010-031500.csv" in capsys.readouterr().out
+
+
+def test_problem_squares(monkeypatch):
+    import problem_map as pm
+    log = dl.parse("\n".join(INDOOR), "i")
+    # Localized at (4, 6) for 3 s: the 2 m square with its middle at (5, 7). Lost at (10, 2) for 1 s: under
+    # MIN_SECONDS, so left out, until that's lowered.
+    (only,) = pm.squares([log])
+    assert (only["x"], only["z"], only["seconds"], only["lost_share"]) == (5.0, 7.0, pytest.approx(3.0), 0.0)
+    assert only["spread_median_m"] == pytest.approx(1.2) and only["sessions"] == 1
+    monkeypatch.setattr(pm, "MIN_SECONDS", 0.5)
+    lost = [s for s in pm.squares([log]) if s["lost_share"] > 0]
+    assert [(s["x"], s["z"], s["lost_share"]) for s in lost] == [(11.0, 3.0, 1.0)]
+    assert math.isnan(lost[0]["spread_median_m"])   # no Localized time there
+    assert pm.squares([dl.parse("\n".join(WALK), "w")]) == []   # walks have no Localizer estimates
+
+
+def test_problem_doors_worst_first():
+    import problem_map as pm
+    d110, d121 = pm.doors([dl.parse("\n".join(INDOOR), "i")])
+    assert (d110["door"], d110["error_p75_m"], d110["confident_wrong"]) == ("d110", pytest.approx(5.0), 1)
+    assert (d121["door"], d121["error_p75_m"], d121["confident_wrong"]) == ("d121", pytest.approx(1.0), 0)   # Lost: not confident
+
+
+def test_problem_map_finds_the_floors_and_draws():
+    import problem_map as pm
+    data = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "Assets", "Navigation", "Data")
+    plans = pm.plans(data)
+    ba1 = plans["Business Administration I Floor 1"]   # as indoor logs name it
+    assert os.path.isfile(ba1["picture"]) and ba1["width_m"] == pytest.approx(2048 * 0.050172, rel=1e-3)
+    assert "L3Harris Engineering Center Floor 1" in plans
+    pytest.importorskip("matplotlib")
+    log = dl.parse("\n".join(INDOOR), "i")
+    out = pm.draw("BA1", ba1, pm.squares([log]), pm.doors([log]), os.path.join(os.environ.get("TMP", "/tmp"), "pm.png"))
+    with open(out, "rb") as f:
+        assert f.read(4) == b"\x89PNG"
