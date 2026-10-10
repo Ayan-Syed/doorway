@@ -106,6 +106,7 @@ public partial class NavigationScreen
             ShowHome();
         if (building.indoor)
         {
+            homeSheet.MoveTo(1, false);   // its rooms come up in the sheet under the floor
             GoInside();
             return;
         }

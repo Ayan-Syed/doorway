@@ -68,6 +68,10 @@ public partial class NavigationScreen : MonoBehaviour
     public BottomSheet homeSheet;
     public Text homeTitle;
     public Text homeSubtitle;
+    [Tooltip("The search box in the directory sheet, over the list: it searches the building's places only.")]
+    public CanvasGroup roomSearch;
+    public InputField roomSearchField;
+    public Button roomSearchClear;
     public PlaceList homeList;
 
     [Header("Place")]

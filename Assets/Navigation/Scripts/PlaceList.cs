@@ -38,6 +38,7 @@ public class PlaceList : MonoBehaviour
 
     string m_Kind;
     string m_Query = "";
+    bool m_Wide = true;   // something typed shows the searchOnly rows too
     bool m_Initialized;
 
     void Awake() => Initialize();
@@ -128,6 +129,17 @@ public class PlaceList : MonoBehaviour
     public void Filter(string query)
     {
         Initialize();
+        m_Wide = true;
+        Apply(query);
+        if (scroll != null)
+            scroll.verticalNormalizedPosition = 1f;
+    }
+
+    // Filter, but the searchOnly rows stay hidden: a search within the list as it stands (the building's places).
+    public void FilterWithin(string query)
+    {
+        Initialize();
+        m_Wide = false;
         Apply(query);
         if (scroll != null)
             scroll.verticalNormalizedPosition = 1f;
@@ -161,7 +173,7 @@ public class PlaceList : MonoBehaviour
         int shown = 0;
         foreach (Row row in m_Rows)
         {
-            bool match = (m_Kind == null || row.kind == m_Kind) && (!row.searchOnly || words.Length > 0) && HasAll(row.searchText, words);
+            bool match = (m_Kind == null || row.kind == m_Kind) && (!row.searchOnly || (m_Wide && words.Length > 0)) && HasAll(row.searchText, words);
             if (match != row.shown)
             {
                 row.shown = match;

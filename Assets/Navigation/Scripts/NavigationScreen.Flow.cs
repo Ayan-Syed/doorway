@@ -45,6 +45,12 @@ public partial class NavigationScreen
         searchLead.onClick.AddListener(OnSearchLead);
         searchClear.onClick.AddListener(OnSearchClear);
         settingsButton.onClick.AddListener(OpenSettings);
+        if (roomSearchField != null)
+        {
+            roomSearchField.onValueChanged.AddListener(OnRoomSearch);
+            roomSearchClear.onClick.AddListener(ClearRoomSearch);
+            roomSearchClear.gameObject.SetActive(false);
+        }
         for (int i = 0; i < chips.Length && i < ChipKinds.Length; i++)
         {
             string kind = ChipKinds[i];
