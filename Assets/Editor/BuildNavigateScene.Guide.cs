@@ -30,8 +30,10 @@ public static partial class BuildNavigateScene
         screen.maneuverDetail = TextIn(TopBand("Detail", banner, 108f, 52f, textLeft, textRight), "", s_Regular, 36,
             Alpha(s_T.onBanner, 0.75f), TextAnchor.MiddleLeft);
         BestFit(screen.maneuverDetail, 26);
+        // How far, in the ribbon's colour on a dark banner; on a light one that's too pale to read, so the accent.
+        bool lightBanner = s_T.banner.grayscale > 0.5f;
         screen.maneuverDistance = TextIn(Fixed("Distance", banner, Vector2.one, new Vector2(-40f - 90f, -70f), new Vector2(180f, 64f)),
-            "30 ft", s_SemiBold, 46, s_T.Ribbon, TextAnchor.MiddleRight);
+            "30 ft", s_SemiBold, 46, lightBanner ? s_T.primary : s_T.Ribbon, TextAnchor.MiddleRight);
 
         RectTransform then = Fixed("Then", banner, new Vector2(1f, 0f), new Vector2(-40f - 84f, 50f), new Vector2(168f, 60f));
         Card(then, s_T.bannerDark, SmallCorner, false);

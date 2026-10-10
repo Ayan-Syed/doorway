@@ -191,11 +191,11 @@ public class Theme
         onPrimary = C(0xFF, 0xFF, 0xFF),
         primaryContainer = C(0xDC, 0xD6, 0xF7),
         routeCasing = C(0x2A, 0x2E, 0x52),
-        // The turn banner over the camera: deep indigo glass, calm over a bright scene; the arrow's tile is the
-        // ribbon's periwinkle, so the banner and the line on the floor read as one.
-        banner = C(0x2B, 0x2F, 0x52, 0xF0),
-        bannerDark = C(0x3D, 0x42, 0x70),
-        onBanner = C(0xF1, 0xEF, 0xFB),
+        // The turn banner over the camera: white glass like the theme's other cards, indigo text, a lavender Then
+        // chip; the arrow's tile is the ribbon's periwinkle, so the banner and the line on the floor read as one.
+        banner = C(0xFF, 0xFF, 0xFF, 0xF2),
+        bannerDark = C(0xEA, 0xE7, 0xF8),
+        onBanner = C(0x22, 0x25, 0x45),
         destination = C(0xB8, 0x39, 0x6B),
         onDestination = C(0xFF, 0xFF, 0xFF),
         good = C(0x2F, 0x7A, 0x5B),
