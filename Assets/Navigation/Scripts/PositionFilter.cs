@@ -96,6 +96,7 @@ public sealed class PositionFilter
     readonly float[] m_Distance;
     readonly int[] m_Order;
     readonly HashSet<long> m_Bins = new HashSet<long>();
+    readonly List<Vector2> m_Cells = new List<Vector2>();
     readonly List<Vector2> m_StandOff = new List<Vector2>();
     readonly List<bool> m_HasStandOff = new List<bool>();
     readonly System.Random m_Random;
@@ -449,27 +450,49 @@ public sealed class PositionFilter
         UpdateEstimate();
     }
 
-    // Spreads the cloud over walkable floor within radius of centre (the user asked to find themselves again): any
-    // heading, or the present one give or take a little.
+    // Spreads the cloud evenly over the walkable floor within radius of centre (the user asked to find themselves
+    // again): any heading, or the present one give or take a little. Drawn from the walkable cells themselves, not by
+    // trying random spots: in a narrow hallway most of a disc is wall, and particles that failed to land would pile up
+    // on one spot and look like confidence.
     public void Scatter(Vector2 centre, float radius, bool anyHeading)
     {
         if (anyHeading)
             FreeHeading();
         if (Adaptive)
             m_Count = m_MaxCount;
+        m_Cells.Clear();
+        if (m_Walkable != null)
+        {
+            float cell = m_Walkable.cell;
+            int i0 = Mathf.Max(0, Mathf.FloorToInt((centre.x - radius - m_Walkable.left) / cell));
+            int i1 = Mathf.Min(m_Walkable.width - 1, Mathf.FloorToInt((centre.x + radius - m_Walkable.left) / cell));
+            int j0 = Mathf.Max(0, Mathf.FloorToInt((m_Walkable.top - centre.y - radius) / cell));
+            int j1 = Mathf.Min(m_Walkable.height - 1, Mathf.FloorToInt((m_Walkable.top - centre.y + radius) / cell));
+            for (int j = j0; j <= j1; j++)
+            {
+                for (int i = i0; i <= i1; i++)
+                {
+                    var c = new Vector2(m_Walkable.left + (i + 0.5f) * cell, m_Walkable.top - (j + 0.5f) * cell);
+                    if ((c - centre).sqrMagnitude <= radius * radius && m_Walkable.IsWalkable(c))
+                        m_Cells.Add(c);
+                }
+            }
+        }
         for (int i = 0; i < m_Count; i++)
         {
-            Vector2 at = Estimate;
-            for (int t = 0; t < SeedTries * 2; t++)
+            Vector2 at;
+            if (m_Cells.Count > 0)
+            {
+                // A random cell, and a random spot in it.
+                float cell = m_Walkable.cell;
+                at = m_Cells[m_Random.Next(m_Cells.Count)] +
+                     new Vector2((float)m_Random.NextDouble() - 0.5f, (float)m_Random.NextDouble() - 0.5f) * cell;
+            }
+            else
             {
                 float angle = (float)m_Random.NextDouble() * 2f * Mathf.PI;
                 float r = radius * Mathf.Sqrt((float)m_Random.NextDouble());
-                Vector2 c = centre + new Vector2(Mathf.Sin(angle), Mathf.Cos(angle)) * r;
-                if (m_Walkable == null || m_Walkable.IsWalkable(c))
-                {
-                    at = c;
-                    break;
-                }
+                at = centre + new Vector2(Mathf.Sin(angle), Mathf.Cos(angle)) * r;
             }
             m_Position[i] = at;
             m_Heading[i] = anyHeading ? RandomHeading() : Bound(HeadingOffset + Gaussian() * RecoverHeadingSpread);

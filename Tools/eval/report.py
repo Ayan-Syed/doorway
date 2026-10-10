@@ -30,11 +30,16 @@ def read_results(path):
     """The rows, error_m and time_s as floats (NaN where the filter gave no position)."""
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        missing = [c for c in COLUMNS if c not in (reader.fieldnames or [])]
+        fields = list(reader.fieldnames or [])
+        if "time_s" not in fields and "time" in fields:
+            fields.append("time_s")   # ReplayEvaluator writes it as time (seconds)
+        missing = [c for c in COLUMNS if c not in fields]
         if missing:
             sys.exit(f"{path}: no column {', '.join(missing)}")
         rows = list(reader)
     for r in rows:
+        if "time_s" not in r:
+            r["time_s"] = r.get("time")
         for key in ("error_m", "time_s"):
             try:
                 r[key] = float(r[key])
