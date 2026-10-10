@@ -22,6 +22,15 @@ public partial class NavigationScreen
         }
         UpdateIndoors(true);
         UpdateHomeChrome();
+        if (micButton != null)
+            PlaceMic();   // over the sheet as it now is, as the next frame would put it
+    }
+
+    // The directory all the way up with one dropdown open, and the rooms inside one of its rooms showing.
+    public void PreviewDirectoryOpen(string section, string room)
+    {
+        PreviewHome(2, null, null);
+        homeList.Open(section, room);
     }
 
     // Home out over the campus, under the launch screen or not.

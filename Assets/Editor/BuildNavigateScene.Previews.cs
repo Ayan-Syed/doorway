@@ -278,6 +278,7 @@ public static partial class BuildNavigateScene
             Capture("1b-floors", s.PreviewFloorMenu);
             Capture("1c-settings", s.PreviewSettings);
             Capture("2-directory", () => s.PreviewHome(1, null, null));
+            Capture("2c-directory-open", () => s.PreviewDirectoryOpen("Other spaces", "Room 145"));
             Capture("2b-restrooms", () => s.PreviewHome(1, null, "restroom"));
             Capture("3-search", () => s.PreviewHome(2, "13", null));
             Capture("3b-search-buildings", () => s.PreviewHome(2, "eng", null));

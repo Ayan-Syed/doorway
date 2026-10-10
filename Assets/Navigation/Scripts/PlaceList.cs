@@ -6,8 +6,17 @@ using UnityEngine.UI;
 
 // A scrolling list of places (or doors) in sections, narrowed down by a search field as the user types and by
 // kind (the filter chips). Rows and section headers are copies of templates built by the scene builder.
+// A section can be a dropdown, closed until tapped, and a row can sit inside another, shown under it once its
+// "n inside" button is tapped. Typing or a chip opens everything: every match shows, and a nested match brings the
+// row it's inside along, so it's clear where it is.
 public class PlaceList : MonoBehaviour
 {
+    // Material Icons: expand_more and expand_less.
+    public const string IconMore = "";
+    public const string IconLess = "";
+    // How much further in a nested row's text starts.
+    const float Indent = 56f;
+
     public ScrollRect scroll;
     public RectTransform content;
     public PlaceListRow rowTemplate;
@@ -32,12 +41,25 @@ public class PlaceList : MonoBehaviour
         public bool fitted;      // a search-only row's title, cut to the row's width the first time it shows
         public int section;
         public bool shown;
+        public int parent = -1;  // the row it's inside, or -1
+        public int children;     // rows inside it
+        public bool expanded;    // its rows inside show (browsing)
+        public bool match;       // the last filter matched it
+        public bool childMatch;  // ...or a row inside it
+    }
+
+    class Section
+    {
+        public GameObject view;
+        public PlaceListSection parts;   // null on a scene built before dropdowns
+        public bool dropdown;
+        public bool open;
+        public bool shown;
+        public int total;   // rows in it, not counting nested ones
     }
 
     readonly List<Row> m_Rows = new List<Row>();
-    readonly List<GameObject> m_Sections = new List<GameObject>();
-    readonly List<bool> m_SectionShown = new List<bool>();
-    readonly List<bool> m_SectionHas = new List<bool>();
+    readonly List<Section> m_Sections = new List<Section>();
     static readonly char[] s_Space = { ' ' };
 
     string m_Kind;
@@ -65,11 +87,10 @@ public class PlaceList : MonoBehaviour
         Initialize();
         foreach (Row row in m_Rows)
             Remove(row.view.gameObject);
-        foreach (GameObject section in m_Sections)
-            Remove(section);
+        foreach (Section section in m_Sections)
+            Remove(section.view);
         m_Rows.Clear();
         m_Sections.Clear();
-        m_SectionShown.Clear();
         Shown = 0;
     }
 
@@ -83,23 +104,44 @@ public class PlaceList : MonoBehaviour
             DestroyImmediate(item);
     }
 
-    public void AddSection(string title)
+    // dropdown: closed until tapped, with how many places are in it (on a scene built before dropdowns, a plain
+    // section).
+    public void AddSection(string title, bool dropdown = false)
     {
         Initialize();
-        GameObject section = Instantiate(sectionTemplate, sectionTemplate.transform.parent, false);
-        section.name = title;
-        Text text = section.GetComponentInChildren<Text>(true);
+        GameObject view = Instantiate(sectionTemplate, sectionTemplate.transform.parent, false);
+        view.name = title;
+        var parts = view.GetComponent<PlaceListSection>();
+        Text text = parts != null && parts.title != null ? parts.title : view.GetComponentInChildren<Text>(true);
         if (text != null)
             text.text = title;
-        section.SetActive(true);
+        var section = new Section { view = view, parts = parts, shown = true };
+        section.dropdown = dropdown && parts != null && parts.button != null;
+        section.open = !section.dropdown;
+        if (parts != null)
+        {
+            if (parts.button != null)
+                parts.button.enabled = section.dropdown;
+            SetActive(parts.count, section.dropdown);
+            SetActive(parts.chevron, section.dropdown);
+            if (parts.divider != null)
+                parts.divider.SetActive(section.dropdown);
+            if (section.dropdown)
+                parts.button.onClick.AddListener(() =>
+                {
+                    section.open = !section.open;
+                    Apply(m_Query);
+                });
+        }
+        view.SetActive(true);
         m_Sections.Add(section);
-        m_SectionShown.Add(true);
     }
 
-    // A row under the last section. searchOnly: shown only while something is typed (the campus's buildings).
-    // Those many rows can come on together as the first letter is typed, so their text is one fixed size, not
-    // best fit (which lays the text out again and again to find its size), and a long name is cut short instead.
-    public void AddRow(string kind, string title, string detail, UnityAction onTap, bool searchOnly = false)
+    // A row under the last section, and its index. searchOnly: shown only while something is typed (the campus's
+    // buildings). Those many rows can come on together as the first letter is typed, so their text is one fixed
+    // size, not best fit (which lays the text out again and again to find its size), and a long name is cut short
+    // instead. parent: the row (an index from AddRow) it's inside, which then gets an "n inside" button.
+    public int AddRow(string kind, string title, string detail, UnityAction onTap, bool searchOnly = false, int parent = -1)
     {
         Initialize();
         PlaceListRow view = Instantiate(rowTemplate, rowTemplate.transform.parent, false);
@@ -115,7 +157,25 @@ public class PlaceList : MonoBehaviour
             FixedSize(view.title);
             FixedSize(view.detail);
         }
-        view.gameObject.SetActive(!searchOnly);
+        if (view.toggle != null)
+            view.toggle.gameObject.SetActive(false);
+
+        int section = m_Sections.Count - 1;
+        if (parent < 0 || parent >= m_Rows.Count)
+            parent = -1;
+        else
+        {
+            if (view.textColumn != null)
+                view.textColumn.offsetMin += new Vector2(Indent, 0f);
+            if (view.divider != null)
+                view.divider.offsetMin += new Vector2(Indent, 0f);
+            AddChild(parent);
+        }
+        if (section >= 0 && !searchOnly && parent < 0)
+            m_Sections[section].total++;   // the rows opening it shows; nested ones are counted on their button
+        // Until the next filter: in an open section, not nested.
+        bool shown = !searchOnly && parent < 0 && (section < 0 || m_Sections[section].open);
+        view.gameObject.SetActive(shown);
 
         m_Rows.Add(new Row
         {
@@ -124,9 +184,39 @@ public class PlaceList : MonoBehaviour
             title = title,
             searchText = $"{title} {detail} {PlaceStyle.Keywords(kind)}".ToLowerInvariant(),
             searchOnly = searchOnly,
-            section = m_Sections.Count - 1,
-            shown = !searchOnly,
+            section = section,
+            shown = shown,
+            parent = parent,
         });
+        return m_Rows.Count - 1;
+    }
+
+    // A row has one more inside it: its button says how many, and leaves room for itself in the row.
+    void AddChild(int index)
+    {
+        Row row = m_Rows[index];
+        row.children++;
+        PlaceListRow view = row.view;
+        if (view.toggle == null)
+            return;
+        if (row.children == 1)
+        {
+            if (view.textColumn != null)
+                view.textColumn.offsetMax -= new Vector2(((RectTransform)view.toggle.transform).sizeDelta.x + 24f, 0f);
+            view.toggle.onClick.AddListener(() =>
+            {
+                row.expanded = !row.expanded;
+                Apply(m_Query);
+            });
+        }
+        if (view.toggleLabel != null)
+            view.toggleLabel.text = $"{row.children} inside";
+    }
+
+    static void SetActive(Component part, bool on)
+    {
+        if (part != null && part.gameObject.activeSelf != on)
+            part.gameObject.SetActive(on);
     }
 
     // One line at the template's size. It may overflow its box: Google Sans's lines are taller than their size,
@@ -203,13 +293,31 @@ public class PlaceList : MonoBehaviour
         Apply(m_Query);
     }
 
+    // Nothing typed, no chip, and every dropdown and nested row closed again.
     public void ResetSearch()
     {
         Initialize();
         if (searchField != null)
             searchField.SetTextWithoutNotify("");
         m_Kind = null;
+        foreach (Section section in m_Sections)
+            section.open = !section.dropdown;
+        foreach (Row row in m_Rows)
+            row.expanded = false;
         Filter("");
+    }
+
+    // Opens the dropdown with this title and, if given, the rooms inside the row with this one (the previews).
+    public void Open(string section, string row = null)
+    {
+        Initialize();
+        foreach (Section s in m_Sections)
+            if (s.view.name == section)
+                s.open = true;
+        foreach (Row r in m_Rows)
+            if (row != null && r.title == row && r.children > 0)
+                r.expanded = true;
+        Apply(m_Query);
     }
 
     void Apply(string query)
@@ -217,47 +325,86 @@ public class PlaceList : MonoBehaviour
         m_Query = query ?? "";
         string[] words = m_Query.ToLowerInvariant().Split(s_Space, StringSplitOptions.RemoveEmptyEntries);
 
-        m_SectionHas.Clear();
-        for (int i = 0; i < m_Sections.Count; i++)
-            m_SectionHas.Add(false);
+        // Browsing: dropdowns and nested rows as the user left them. Typing or a chip: every match, opened up.
+        bool browsing = words.Length == 0 && m_Kind == null;
 
         // Typing, only the first rows that match: every row shown costs layout and text, and a screenful is plenty.
         int limit = words.Length > 0 && maxSearchRows > 0 ? maxSearchRows : int.MaxValue;
-        int shown = 0;
+        int matched = 0;
         foreach (Row row in m_Rows)
         {
-            bool match = shown < limit && (m_Kind == null || row.kind == m_Kind)
-                         && (!row.searchOnly || (m_Wide && words.Length > 0)) && HasAll(row.searchText, words);
-            if (match && row.searchOnly && !row.fitted)
+            row.match = matched < limit && (m_Kind == null || row.kind == m_Kind)
+                        && (!row.searchOnly || (m_Wide && words.Length > 0)) && HasAll(row.searchText, words);
+            row.childMatch = false;
+            if (row.match)
+                matched++;
+        }
+        foreach (Row row in m_Rows)
+            if (row.match && row.parent >= 0)
+                m_Rows[row.parent].childMatch = true;
+
+        var counts = new int[m_Sections.Count];   // per section: rows matched (browsing: all of them)
+        foreach (Row row in m_Rows)
+        {
+            bool visible;
+            if (browsing)
+                visible = row.match && (row.section < 0 || m_Sections[row.section].open)
+                          && (row.parent < 0 || m_Rows[row.parent].expanded);
+            else
+                visible = row.match || row.childMatch;
+            if (visible && row.searchOnly && !row.fitted)
                 Fit(row);
-            if (match != row.shown)
+            if (visible != row.shown)
             {
-                row.shown = match;
-                row.view.gameObject.SetActive(match);
+                row.shown = visible;
+                row.view.gameObject.SetActive(visible);
             }
-            if (!match)
-                continue;
-            shown++;
-            if (row.section >= 0)
-                m_SectionHas[row.section] = true;
+            if (row.view.toggle != null && row.children > 0)
+            {
+                SetActive(row.view.toggle, browsing);   // everything inside that matches already shows
+                if (row.view.toggleIcon != null)
+                    row.view.toggleIcon.text = row.expanded ? IconLess : IconMore;
+            }
+            if (row.match && row.section >= 0)
+                counts[row.section]++;
         }
 
         for (int i = 0; i < m_Sections.Count; i++)
-            if (m_SectionHas[i] != m_SectionShown[i])
-            {
-                m_SectionShown[i] = m_SectionHas[i];
-                m_Sections[i].SetActive(m_SectionHas[i]);
-            }
+            StyleSection(m_Sections[i], counts[i], browsing);
 
-        Shown = shown;
+        Shown = matched;
         if (emptyText != null)
         {
-            bool empty = shown == 0;
+            bool empty = matched == 0;
             if (empty)
                 emptyText.text = EmptyMessage(m_Query.Trim(), m_Kind);
             if (emptyText.gameObject.activeSelf != empty)
                 emptyText.gameObject.SetActive(empty);
         }
+    }
+
+    // A section shows while it has a match (a closed dropdown too, so it can be opened). A dropdown's count is the
+    // rows opening it shows while browsing, the matches otherwise; it only opens and closes while browsing.
+    void StyleSection(Section section, int count, bool browsing)
+    {
+        bool shown = count > 0;
+        if (shown != section.shown)
+        {
+            section.shown = shown;
+            section.view.SetActive(shown);
+        }
+        if (!section.dropdown)
+            return;
+        PlaceListSection parts = section.parts;
+        bool open = !browsing || section.open;
+        parts.button.interactable = browsing;
+        if (parts.count != null)
+            parts.count.text = (browsing ? section.total : count).ToString();
+        SetActive(parts.chevron, browsing);
+        if (parts.chevron != null)
+            parts.chevron.text = open ? IconLess : IconMore;
+        if (parts.divider != null && parts.divider.activeSelf == open)
+            parts.divider.SetActive(!open);
     }
 
     static bool HasAll(string text, string[] words)
@@ -296,7 +443,7 @@ public class PlaceList : MonoBehaviour
     {
         foreach (Row row in m_Rows)
             ThemeColors.CopyColors(rowTemplate, row.view);
-        foreach (GameObject section in m_Sections)
-            ThemeColors.CopyColors(sectionTemplate.transform, section.transform);
+        foreach (Section section in m_Sections)
+            ThemeColors.CopyColors(sectionTemplate.transform, section.view.transform);
     }
 }

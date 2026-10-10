@@ -57,22 +57,116 @@ public partial class NavigationScreen
         UpdateHomeChrome();
     }
 
+    // The directory: the rooms by kind of room, then restrooms, elevators and stairs, and entrances, each a dropdown
+    // that starts closed, so the sheet opens on a short list of groups.
     void FillHome()
     {
         homeList.Clear();
+        AddRooms();
         foreach (var (title, kinds) in Sections)
         {
+            if (Array.IndexOf(kinds, "room") >= 0)
+                continue;   // AddRooms has them
             bool header = false;
             foreach (PlanPlace place in Places(kinds))
             {
                 if (!header)
                 {
-                    homeList.AddSection(title);
+                    homeList.AddSection(title, dropdown: true);
                     header = true;
                 }
                 homeList.AddRow(place.kind, PlaceStyle.Title(place), place.detail, () => ShowPlace(place));
             }
         }
+    }
+
+    // A dropdown per kind of room the plan names ("Classroom" -> Classrooms), with the one-of-a-kind ones together
+    // in Other spaces and the plain "Room"s last in Other rooms. A room inside another ("Inside 145") goes under it,
+    // behind its "n inside" button; one inside a room that's itself inside one goes under the outermost.
+    void AddRooms()
+    {
+        List<PlanPlace> rooms = Places(new[] { "room" }).ToList();
+        var byNumber = new Dictionary<string, PlanPlace>();
+        foreach (PlanPlace room in rooms)
+        {
+            string number = RoomNumber(room);
+            if (number.Length > 0 && !byNumber.ContainsKey(number))
+                byNumber.Add(number, room);
+        }
+
+        var outer = new List<PlanPlace>();
+        var inside = new Dictionary<PlanPlace, List<PlanPlace>>();
+        foreach (PlanPlace room in rooms)
+        {
+            PlanPlace parent = Outermost(room, byNumber);
+            if (parent == null)
+            {
+                outer.Add(room);
+                continue;
+            }
+            if (!inside.TryGetValue(parent, out List<PlanPlace> list))
+                inside.Add(parent, list = new List<PlanPlace>());
+            list.Add(room);
+        }
+
+        var types = outer.GroupBy(r => r.detail ?? "").ToDictionary(g => g.Key, g => g.Count());
+        string Group(PlanPlace room)
+        {
+            string type = room.detail ?? "";
+            if (type.Length == 0 || type == "Room")
+                return OtherRooms;
+            return types[type] > 1 ? (type.EndsWith("s") ? type : type + "s") : OtherSpaces;
+        }
+        // Named kinds first, the biggest first; then the one-offs; then the plain rooms.
+        IEnumerable<IGrouping<string, PlanPlace>> groups = outer.GroupBy(Group)
+            .OrderBy(g => g.Key == OtherRooms ? 2 : g.Key == OtherSpaces ? 1 : 0)
+            .ThenByDescending(g => g.Count())
+            .ThenBy(g => g.Key, StringComparer.Ordinal);
+
+        foreach (IGrouping<string, PlanPlace> group in groups)
+        {
+            homeList.AddSection(group.Key, dropdown: true);
+            foreach (PlanPlace room in group)
+            {
+                PlanPlace place = room;
+                int row = homeList.AddRow(place.kind, PlaceStyle.Title(place), place.detail, () => ShowPlace(place));
+                if (!inside.TryGetValue(place, out List<PlanPlace> within))
+                    continue;
+                foreach (PlanPlace child in within)
+                {
+                    PlanPlace inner = child;
+                    homeList.AddRow(inner.kind, PlaceStyle.Title(inner), inner.detail, () => ShowPlace(inner), parent: row);
+                }
+            }
+        }
+    }
+
+    const string OtherSpaces = "Other spaces";
+    const string OtherRooms = "Other rooms";
+
+    // "148" for "148" or "148 The Exchange".
+    static string RoomNumber(PlanPlace room)
+    {
+        string name = (room.name ?? "").Trim();
+        int space = name.IndexOf(' ');
+        return space < 0 ? name : name.Substring(0, space);
+    }
+
+    // The room a room is inside, followed out to the outermost one ("Inside 148E", and 148E is inside 148); null
+    // for a room that isn't inside one the plan has.
+    static PlanPlace Outermost(PlanPlace room, Dictionary<string, PlanPlace> byNumber)
+    {
+        PlanPlace parent = null;
+        PlanPlace at = room;
+        for (int depth = 0; depth < 8; depth++)   // a loop in the data stops here
+        {
+            string detail = at.detail ?? "";
+            if (!detail.StartsWith("Inside ", StringComparison.Ordinal)
+                || !byNumber.TryGetValue(detail.Substring(7).Trim(), out PlanPlace next) || next == room)
+                break;
+            parent = at = next;
+        }
+        return parent;
     }
 
     // The plan's places of these kinds, in the kinds' order. Rooms by number, the rest as listed in the plan.
@@ -232,6 +326,8 @@ public partial class NavigationScreen
             SetAlpha(locate, chrome);
         if (attribution != null)
             SetAlpha(attribution, chrome);
+        if (insideButton != null)
+            SetAlpha(insideButton, chrome);   // UpdateIndoor says whether it's there at all
         // The sheet's search shows once the sheet's up past its peek, but not while the search bar searches.
         if (roomSearch != null)
         {
