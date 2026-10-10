@@ -35,10 +35,11 @@ public static partial class ReplayEvaluator
         public double firstWrongAt = double.NaN;
         public readonly List<float> errors = new List<float>();   // while not Lost
         public readonly List<float> localizedErrors = new List<float>();
-        // What the user sees (GuidanceSim): walking time, the part with normal guidance and its errors, the walk's
+        // What the user sees (GuidanceTracker): walking time, the part with normal guidance and its errors, the walk's
         // length, and each "Finding your exact spot…" spell's length.
-        public float walkSeconds, guidedSeconds, walked;
+        public float walkSeconds, guidedSeconds, walked, nearTurnSeconds, preciseNearTurnSeconds;
         public readonly List<float> guidedErrors = new List<float>();
+        public readonly List<float> turnErrors = new List<float>();   // while a precise turn instruction shows
         public readonly List<float> interruptions = new List<float>();
         public readonly List<float> recoveries = new List<float>();
         public int lost, wrong, within, judged;
@@ -52,48 +53,89 @@ public static partial class ReplayEvaluator
         public float median, p75, p95, max, lostShare, wrongShare, calibration, recoveryMedian, recoveryMax;
         public float localizedShare, localizedP95, localizedMax;
         public float guidance, guidedP75, guidedP95, guidedMax, interruptionsPer100m, interruptionMedian, interruptionP90;
+        public float turnPrecision, turnErrorP95;
         public int recoveries, slowRecoveries;
     }
 
-    /// <summary>The guidance the UI would show (NavigationScreen.JudgeGuidance, mirrored here: keep the two alike):
-    /// normal guidance unless Lost (at once) or Converging with Spread past UnsureEnter, back under UnsureLeave, each
-    /// change held GuidanceHold seconds; out of Lost at once.</summary>
-    public sealed class GuidanceSim
+    /// <summary>The guidance the screen would show: NavigationScreen.WantedGuidance itself, with the screen's hold
+    /// (a change of level only once it has been called for GuidanceHold seconds; the first, Lost, and out of Lost,
+    /// at once).
+    /// </summary>
+    public sealed class GuidanceTracker
     {
-        public const float UnsureEnter = 2.5f, UnsureLeave = 2f, GuidanceHold = 1f;
-        enum Guidance { Sure, Unsure, Lost }
-        Guidance m_Guidance;
+        public const float GuidanceHold = 1f;
+        public NavigationScreen.Guidance Level { get; private set; }
         double m_Pending = -1;
+        bool m_Started;
 
-        /// <summary>Whether normal guidance shows at time t.</summary>
-        public bool Judge(LocalizerState state, float spread, double t)
+        public NavigationScreen.Guidance Judge(LocalizerState state, float spread, float alongSpread, float toTurn, double t)
         {
-            if (state == LocalizerState.Lost)
+            NavigationScreen.Guidance want = NavigationScreen.WantedGuidance(state, spread, alongSpread, toTurn, Level);
+            // The first judgement is instant, as the screen's when guiding starts (UpdateGuide(true) in StartGuide).
+            if (!m_Started || want == NavigationScreen.Guidance.Lost || Level == NavigationScreen.Guidance.Lost)
             {
+                m_Started = true;
                 m_Pending = -1;
-                m_Guidance = Guidance.Lost;
-                return false;
+                return Level = want;
             }
-            bool wide = state == LocalizerState.Converging &&
-                        (m_Guidance == Guidance.Unsure ? spread >= UnsureLeave : spread > UnsureEnter);
-            Guidance want = wide ? Guidance.Unsure : Guidance.Sure;
-            if (want == m_Guidance)
+            if (want == Level)
                 m_Pending = -1;
-            else if (m_Guidance == Guidance.Lost)
-            {
-                m_Guidance = want;
-                m_Pending = -1;
-            }
             else if (m_Pending < 0)
                 m_Pending = t;
             else if (t - m_Pending >= GuidanceHold)
             {
-                m_Guidance = want;
+                Level = want;
                 m_Pending = -1;
             }
-            return m_Guidance == Guidance.Sure;
+            return Level;
         }
     }
+
+    // The guided route's turns (a bend of TurnAngle or more at a vertex) and the distance along it to the next turn
+    // from a point (infinity with none ahead).
+    sealed class RouteTurns
+    {
+        readonly Vector2[] m_Points;
+        readonly float[] m_Along;
+        readonly List<float> m_Turns = new List<float>();
+        const float TurnAngle = 30f;
+
+        public RouteTurns(Vector2[] points)
+        {
+            m_Points = points;
+            m_Along = new float[points.Length];
+            for (int i = 1; i < points.Length; i++)
+                m_Along[i] = m_Along[i - 1] + Vector2.Distance(points[i - 1], points[i]);
+            for (int i = 1; i + 1 < points.Length; i++)
+            {
+                float a = PositionFilter.Heading(points[i] - points[i - 1]), b = PositionFilter.Heading(points[i + 1] - points[i]);
+                if (Mathf.Abs(Mathf.DeltaAngle(a, b)) >= TurnAngle)
+                    m_Turns.Add(m_Along[i]);
+            }
+        }
+
+        public float ToTurn(Vector2 p)
+        {
+            float best = float.PositiveInfinity, along = 0f;
+            for (int i = 1; i < m_Points.Length; i++)
+            {
+                Vector2 q = Router.ClosestOnSegment(p, m_Points[i - 1], m_Points[i]);
+                float d = (q - p).sqrMagnitude;
+                if (d < best)
+                {
+                    best = d;
+                    along = m_Along[i - 1] + Vector2.Distance(m_Points[i - 1], q);
+                }
+            }
+            foreach (float turn in m_Turns)
+                if (turn > along)
+                    return turn - along;
+            return float.PositiveInfinity;
+        }
+    }
+
+    // Within this of a turn, the turn instruction's distance matters (turn precision).
+    const float TurnWindow = 10f;
 
     // Walking: the truth moved more than this between two truth rows (a fifth of a second).
     const float MovingStep = 0.05f;
@@ -109,7 +151,8 @@ public static partial class ReplayEvaluator
         var feeder = new Feeder(engine);
         double signWhileLost = double.NaN, lastT = double.NaN, unsureSince = double.NaN;
         Vector2 lastTruth = default;
-        var guidance = new GuidanceSim();
+        var guidance = new GuidanceTracker();
+        RouteTurns turns = null;
         foreach (string line in walk.lines)
         {
             bool lost = engine.State == LocalizerState.Lost;
@@ -117,6 +160,15 @@ public static partial class ReplayEvaluator
                 signWhileLost = double.Parse(line.Split(',')[1], CultureInfo.InvariantCulture);
             if (!feeder.Feed(line, out string[] c, out double t))
                 continue;
+            if (c[0] == "r")
+            {
+                int k = int.Parse(c[2], CultureInfo.InvariantCulture);
+                var points = new Vector2[k];
+                for (int j = 0; j < k; j++)
+                    points[j] = new Vector2(float.Parse(c[3 + 2 * j], CultureInfo.InvariantCulture),
+                        float.Parse(c[4 + 2 * j], CultureInfo.InvariantCulture));
+                turns = new RouteTurns(points);
+            }
             if (c[0] == "a" && engine.State != LocalizerState.Outdoors && walkable != null && !walkable.IsWalkable(engine.Position))
                 result.violations++;
             if (c[0] != "T" || engine.State == LocalizerState.Outdoors)
@@ -124,7 +176,10 @@ public static partial class ReplayEvaluator
             var truth = new Vector2(float.Parse(c[2], CultureInfo.InvariantCulture), float.Parse(c[3], CultureInfo.InvariantCulture));
             float error = Vector2.Distance(engine.Position, truth);
             result.samples++;
-            bool sure = guidance.Judge(engine.State, engine.Spread, t);
+            float toTurn = turns != null ? turns.ToTurn(engine.Position) : float.PositiveInfinity;
+            NavigationScreen.Guidance level = guidance.Judge(engine.State, engine.Spread, engine.AlongSpread, toTurn, t);
+            bool sure = level == NavigationScreen.Guidance.Sure || level == NavigationScreen.Guidance.TurnUnsure;
+            bool nearTurn = turns != null && turns.ToTurn(truth) <= TurnWindow;
             if (!double.IsNaN(lastT))
             {
                 float step = Vector2.Distance(truth, lastTruth), dt = (float)(t - lastT);
@@ -137,6 +192,14 @@ public static partial class ReplayEvaluator
                         result.guidedSeconds += dt;
                         result.guidedErrors.Add(error);
                     }
+                    if (nearTurn)
+                    {
+                        result.nearTurnSeconds += dt;
+                        if (level == NavigationScreen.Guidance.Sure)
+                            result.preciseNearTurnSeconds += dt;
+                    }
+                    if (level == NavigationScreen.Guidance.Sure && toTurn <= TurnWindow)
+                        result.turnErrors.Add(error);
                 }
             }
             if (!sure && double.IsNaN(unsureSince))
@@ -192,6 +255,8 @@ public static partial class ReplayEvaluator
             var localized = group.SelectMany(r => r.localizedErrors).OrderBy(e => e).ToList();
             var guided = group.SelectMany(r => r.guidedErrors).OrderBy(e => e).ToList();
             var spells = group.SelectMany(r => r.interruptions).OrderBy(e => e).ToList();
+            var turnErrors = group.SelectMany(r => r.turnErrors).OrderBy(e => e).ToList();
+            float nearTurn = group.Sum(r => r.nearTurnSeconds);
             float walkSeconds = group.Sum(r => r.walkSeconds), walked = group.Sum(r => r.walked);
             int samples = group.Sum(r => r.samples), judged = group.Sum(r => r.judged);
             summaries.Add(new StressSummary
@@ -221,6 +286,8 @@ public static partial class ReplayEvaluator
                 interruptionsPer100m = walked > 0f ? 100f * spells.Count / walked : float.NaN,
                 interruptionMedian = Percentile(spells, 0.5f),
                 interruptionP90 = Percentile(spells, 0.9f),
+                turnPrecision = nearTurn > 0f ? group.Sum(r => r.preciseNearTurnSeconds) / nearTurn : float.NaN,
+                turnErrorP95 = Percentile(turnErrors, 0.95f),
             });
         }
         return summaries;

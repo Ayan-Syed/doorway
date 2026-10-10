@@ -385,6 +385,31 @@ public sealed class PositionFilter
         UpdateEstimate();
     }
 
+    /// <summary>Particles first..first+count along a line from at: direction (plan) times from..to metres, lateral
+    /// metres of spread across it, walkable and in sight of at; headings evenly within headingSpread of yaw.</summary>
+    public void SeedLine(int first, int count, Vector2 at, Vector2 direction, float from, float to, float lateral,
+        float yaw, float headingSpread)
+    {
+        direction.Normalize();
+        var across = new Vector2(-direction.y, direction.x);
+        for (int i = first; i < first + count && i < m_Count; i++)
+        {
+            Vector2 p = at;
+            for (int t = 0; t < SeedTries; t++)
+            {
+                Vector2 c = at + direction * (from + (float)m_Random.NextDouble() * (to - from)) + across * (Gaussian() * lateral);
+                if (m_Walkable == null || (m_Walkable.IsWalkable(c) && m_Walkable.SegmentClear(at, c)))
+                {
+                    p = c;
+                    break;
+                }
+            }
+            Seed(i, p, 0f, 0f, 0f, 1f, StartScaleSpread);
+            m_Heading[i] = Bound(yaw - BaseYaw + ((float)m_Random.NextDouble() * 2f - 1f) * headingSpread);
+        }
+        UpdateEstimate();
+    }
+
     /// <summary>Particles to use from the next Reset (a snap starts with a few hundred; KLD-sampling takes it on).</summary>
     public void SetCount(int count) => m_Count = Mathf.Clamp(count, 1, m_Capacity);
 

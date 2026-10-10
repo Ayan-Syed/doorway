@@ -20,6 +20,8 @@ public interface IIndoorSource
     Vector2 Position { get; }
     float Heading { get; }
     float Spread { get; }
+    // Metres of uncertainty along the route (ARCore's scale error), apart from Spread.
+    float AlongSpread { get; }
     bool NeedsView { get; }
     bool AskForSign { get; }
     string AskReason { get; }
@@ -47,6 +49,7 @@ public partial class NavigationScreen
         public Vector2 Position => m_Localizer.Position;
         public float Heading => m_Localizer.Heading;
         public float Spread => m_Localizer.Spread;
+        public float AlongSpread => m_Localizer.AlongSpread;
         public bool NeedsView => m_Localizer.NeedsView;
         public bool AskForSign => m_Localizer.AskForSign;
         public string AskReason => m_Localizer.AskReason;
@@ -144,7 +147,7 @@ public partial class NavigationScreen
     {
         public LocalizerState state;
         public Vector2 position;
-        public float heading, spread;
+        public float heading, spread, alongSpread;
         public bool needsView, askForSign, entrancePrompt;
         public string askReason;
         public PlanDoor entranceGuess;
@@ -186,6 +189,7 @@ public partial class NavigationScreen
             position = m_Source.Position,
             heading = m_Source.Heading,
             spread = m_Source.Spread,
+            alongSpread = m_Source.AlongSpread,
             needsView = m_Source.NeedsView,
             askForSign = m_Source.AskForSign,
             entrancePrompt = m_Source.EntrancePrompt,
@@ -382,6 +386,8 @@ public partial class NavigationScreen
             StepCounter.RequestEarly();
             if (navigator.signReader != null)
                 navigator.signReader.PrepareCamera();
+            if (localizer != null)
+                localizer.BeginSnapWatch();   // the walk up to Confirm tells the snap if the user is already walking
         }
         m_SnapOpen = true;
         m_SnapDoor = door;
@@ -445,6 +451,8 @@ public partial class NavigationScreen
         if (!m_SnapOpen)
             return;
         m_SnapOpen = false;
+        if (localizer != null && Application.isPlaying)
+            localizer.EndSnapWatch();
         if (snapPanel != null)
             snapPanel.gameObject.SetActive(false);
         // AR back to what the step wants (indoors the Localizer keeps it on anyway).

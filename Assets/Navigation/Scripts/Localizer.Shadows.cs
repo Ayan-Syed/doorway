@@ -111,9 +111,14 @@ public sealed partial class LocalizerEngine
             Shadow s = m_Others[ranked[r].k];
             s.filter = new PositionFilter(m_Walkable, ShadowParticles, 101 + r, ShadowParticles);
             s.filter.Reset(s.spot, camera, s.yaw, SnapSpread, SnapHeadingSpread, SnapHeadingLimit, true);
-            // The same make-up as the snap's own cloud (a share a few metres on), so neither is favoured by its shape.
-            s.filter.SeedNear(0, Mathf.RoundToInt(ShadowParticles * NearShare), s.spot, s.yaw, NearFrom, NearReach,
-                SnapHeadingSpread);
+            // The same make-up as the snap's own cloud, so neither is favoured by its shape.
+            float inward = DoorInward(s.spot);
+            if (m_SnapMotion.kind == SnapMotion.Walking && !float.IsNaN(inward))
+                s.filter.SeedLine(0, ShadowParticles, s.spot, PositionFilter.HeadingVector(inward), LineFrom,
+                    m_SnapMotion.walked + LineMargin, LineLateral, s.yaw, WalkHeadingSpread);
+            else
+                s.filter.SeedNear(0, Mathf.RoundToInt(ShadowParticles * NearShare), s.spot, s.yaw, NearFrom, NearReach,
+                    SnapHeadingSpread);
             s.filter.MotionLog = 0.0;
             s.log = 0.0;
             m_Shadows.Add(s);

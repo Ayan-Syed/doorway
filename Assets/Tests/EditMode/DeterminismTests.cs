@@ -10,7 +10,7 @@ using NUnit.Framework;
 public class DeterminismTests
 {
     // Seed 253, typical tier, ARCore measuring 8% short.
-    const string Floor = "floor B64E8412B299125D", Field = "field 74709097D69277FC", Rows = "rows 990160977512D943";
+    const string Floor = "floor B64E8412B299125D", Field = "field 74709097D69277FC", Rows = "rows 83D27A827FE9F6FF";
 
     [Test]
     public void AStressWalkMatchesTheHarnessBitForBit()
@@ -26,14 +26,14 @@ public class DeterminismTests
         StringAssert.Contains(Rows, fingerprint, $"the generated walk differs (by row kind: {ReplayEvaluator.LastDetail})");
     }
 
-    // The harness's band per metric (seeds 1+2, 3+4 ... 15+16): p75 0.540 ± 0.013 m, %wrong 0.012 ± 0.023,
-    // %sure 55.5 ± 0.7, %Lost 0.82 ± 0.70, calibration 0.656 ± 0.011 (mean ± sd).
+    // The harness's band per metric (seeds 1+2, 3+4 ... 15+16): p75 0.542 ± 0.011 m, %wrong 0.000 ± 0.000,
+    // %sure 54.6 ± 0.7, %Lost 2.8 ± 0.65, calibration 0.658 ± 0.011 (mean ± sd).
     static readonly (string name, float low, float high)[] Bands =
     {
         ("p75 (m)", 0.48f, 0.60f),
         ("%wrong", 0f, 0.2f),
-        ("%sure", 52.5f, 58.5f),
-        ("%Lost", 0f, 3.6f),
+        ("%sure", 51.5f, 57.7f),
+        ("%Lost", 0f, 5.4f),
         ("calibration", 0.61f, 0.70f),
     };
 
