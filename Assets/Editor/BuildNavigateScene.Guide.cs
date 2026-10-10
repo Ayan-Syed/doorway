@@ -12,35 +12,33 @@ public static partial class BuildNavigateScene
         var panel = (RectTransform)panelGroup.transform;
         const float bannerTop = 16f, bannerHeight = 228f;
 
-        // The step after next: a tab tucked under the banner's bottom edge. Before the banner, so it's under it.
-        RectTransform then = Fixed("Then", panel, new Vector2(0f, 1f), new Vector2(48f, -(bannerTop + bannerHeight - 40f)),
-            new Vector2(232f, 124f));
-        then.pivot = new Vector2(0f, 1f);
-        Card(then, s_T.bannerDark, 36f, false);
-        screen.thenTab = then;
-        RectTransform thenRow = Child("Row", then);
-        thenRow.anchorMin = Vector2.zero;
-        thenRow.anchorMax = new Vector2(1f, 0f);
-        thenRow.pivot = new Vector2(0.5f, 0f);
-        thenRow.sizeDelta = new Vector2(0f, 84f);   // the 84 px showing under the banner
-        HorizontalRow(thenRow, 10f, TextAnchor.MiddleCenter);
-        LayoutText(thenRow, "Then", s_SemiBold, 36, s_T.onBanner);
-        screen.thenIcon = LayoutText(thenRow, IconTurnLeft, s_Icons, 52, s_T.onBanner);
-
-        // The next step: its arrow and how far, what to do, and toward what.
+        // The next step, on a card of deep indigo glass with a shadow: the arrow on a tile in the ribbon's colour (the
+        // line on the floor and the arrow read as one), what to do and toward what beside it, how far at the top
+        // right, and the step after next as a chip at the bottom right.
         RectTransform banner = TopBand("Banner", panel, bannerTop, bannerHeight, 24f, 24f);
-        Card(banner, s_T.banner, 40f, false);
+        Shadow(banner, Lift);
+        Card(banner, s_T.banner, Corner, false);
         screen.banner = banner;
-        screen.maneuverIcon = TextIn(Fixed("Arrow", banner, new Vector2(0f, 1f), new Vector2(112f, -94f), new Vector2(128f, 128f)),
-            IconStraight, s_Icons, 120, s_T.onBanner, TextAnchor.MiddleCenter);
-        screen.maneuverDistance = TextIn(Fixed("Distance", banner, new Vector2(0f, 1f), new Vector2(112f, -184f), new Vector2(200f, 52f)),
-            "30 ft", s_SemiBold, 40, s_T.onBanner, TextAnchor.MiddleCenter);
-        screen.maneuverTitle = TextIn(TopBand("Title", banner, 44f, 84f, 224f, 40f), "Go straight", s_SemiBold, 64,
+        RectTransform tile = Fixed("Tile", banner, new Vector2(0f, 0.5f), new Vector2(24f + 90f, 0f), new Vector2(180f, 180f));
+        Rounded(tile, s_T.Ribbon, 28f);
+        screen.maneuverIcon = TextIn(Stretch("Arrow", tile), IconStraight, s_Icons, 112, Alpha(s_T.banner, 1f),
+            TextAnchor.MiddleCenter);
+        const float textLeft = 24f + 180f + 32f, textRight = 224f;
+        screen.maneuverTitle = TextIn(TopBand("Title", banner, 34f, 72f, textLeft, textRight), "Go straight", s_SemiBold, 54,
             s_T.onBanner, TextAnchor.MiddleLeft);
-        BestFit(screen.maneuverTitle, 44);
-        screen.maneuverDetail = TextIn(TopBand("Detail", banner, 130f, 56f, 224f, 40f), "", s_Regular, 40,
-            Alpha(s_T.onBanner, 0.85f), TextAnchor.MiddleLeft);
-        BestFit(screen.maneuverDetail, 30);
+        BestFit(screen.maneuverTitle, 30);
+        screen.maneuverDetail = TextIn(TopBand("Detail", banner, 108f, 52f, textLeft, textRight), "", s_Regular, 36,
+            Alpha(s_T.onBanner, 0.75f), TextAnchor.MiddleLeft);
+        BestFit(screen.maneuverDetail, 26);
+        screen.maneuverDistance = TextIn(Fixed("Distance", banner, Vector2.one, new Vector2(-40f - 90f, -70f), new Vector2(180f, 64f)),
+            "30 ft", s_SemiBold, 46, s_T.Ribbon, TextAnchor.MiddleRight);
+
+        RectTransform then = Fixed("Then", banner, new Vector2(1f, 0f), new Vector2(-40f - 84f, 50f), new Vector2(168f, 60f));
+        Card(then, s_T.bannerDark, SmallCorner, false);
+        screen.thenTab = then;
+        HorizontalRow(then, 8f, TextAnchor.MiddleCenter);
+        LayoutText(then, "Then", s_SemiBold, 30, Alpha(s_T.onBanner, 0.85f));
+        screen.thenIcon = LayoutText(then, IconTurnLeft, s_Icons, 40, s_T.onBanner);
 
         // Off the route, tracking lost, re-align: a pill under the banner (NavigationScreen places it). It's a button
         // that only takes taps while it asks the user to re-align.

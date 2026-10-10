@@ -39,6 +39,12 @@ public class Theme
     // The soft shadow under cards over the map (UI/Shadow.png tinted). Clear: no shadows, the older themes' look.
     public Color shadow;
 
+    // The route on the floor in AR, and the glow round its edges (its alpha is how strong). Clear: the primary
+    // colour, with no glow (the older themes' look). The turn banner's arrow tile takes the same colour.
+    public Color ribbon, ribbonGlow;
+    public Color Ribbon => ribbon.a > 0f ? ribbon : primary;
+    public Color RibbonChevron => ribbon.a > 0f ? Color.white : onPrimary;
+
     static Color C(int r, int g, int b, int a = 255) => new Color32((byte)r, (byte)g, (byte)b, (byte)a);
 
     public static readonly Theme Campus = new Theme
@@ -185,9 +191,11 @@ public class Theme
         onPrimary = C(0xFF, 0xFF, 0xFF),
         primaryContainer = C(0xDC, 0xD6, 0xF7),
         routeCasing = C(0x2A, 0x2E, 0x52),
-        banner = C(0x42, 0x48, 0x74),
-        bannerDark = C(0x32, 0x37, 0x5E),
-        onBanner = C(0xFF, 0xFF, 0xFF),
+        // The turn banner over the camera: deep indigo glass, calm over a bright scene; the arrow's tile is the
+        // ribbon's periwinkle, so the banner and the line on the floor read as one.
+        banner = C(0x2B, 0x2F, 0x52, 0xF0),
+        bannerDark = C(0x3D, 0x42, 0x70),
+        onBanner = C(0xF1, 0xEF, 0xFB),
         destination = C(0xB8, 0x39, 0x6B),
         onDestination = C(0xFF, 0xFF, 0xFF),
         good = C(0x2F, 0x7A, 0x5B),
@@ -214,6 +222,9 @@ public class Theme
         buildingTop = C(0xE6, 0xE5, 0xEF),
         buildingSide = C(0xC4, 0xC9, 0xD3),
         shadow = C(0x1E, 0x20, 0x46, 0x4A),
+        // Periwinkle turned up: bright and saturated on a grey floor in any light.
+        ribbon = C(0x72, 0x86, 0xFF, 0xF0),
+        ribbonGlow = C(0xB3, 0xBE, 0xFF, 0xD0),
     };
 
     public static readonly Theme Dusk = new Theme
@@ -232,9 +243,9 @@ public class Theme
         onPrimary = C(0x1A, 0x1D, 0x38),
         primaryContainer = C(0x45, 0x4C, 0x8A),
         routeCasing = C(0x0E, 0x10, 0x24),
-        banner = C(0xA6, 0xB1, 0xE1),
-        bannerDark = C(0x8C, 0x98, 0xCC),
-        onBanner = C(0x1A, 0x1D, 0x38),
+        banner = C(0x22, 0x26, 0x48, 0xF0),
+        bannerDark = C(0x3A, 0x3F, 0x6E),
+        onBanner = C(0xF2, 0xF0, 0xFC),
         destination = C(0xF0, 0x8A, 0xAE),
         onDestination = C(0x1A, 0x1D, 0x38),
         good = C(0x8F, 0xD3, 0xB6),
@@ -260,6 +271,8 @@ public class Theme
         buildingTop = C(0x24, 0x27, 0x44),
         buildingSide = C(0x18, 0x1A, 0x33),
         shadow = C(0x04, 0x05, 0x10, 0xB0),
+        ribbon = C(0x8C, 0x9B, 0xFF, 0xF0),
+        ribbonGlow = C(0xA9, 0xB4, 0xFF, 0xE0),
     };
 
     public static readonly Theme[] All = { Iris, Dusk, Campus, Paper, Knight };

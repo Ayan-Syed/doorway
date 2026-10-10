@@ -1,13 +1,16 @@
 // The route on the floor in AR: a band in the route colour with white chevrons flowing along it toward the
-// destination. The texture's red channel is the band's opacity (soft at the edges), green the chevrons. v runs
-// along the route; the chevrons scroll at _ScrollSpeed repeats per second. Unlit, transparent.
+// destination, and a soft glow round its edges. The texture's red channel is the band's opacity (solid at the
+// edges), green the chevrons, blue the glow (peaking on the band's edges, fading out past them). v runs along the
+// route; the chevrons scroll at _ScrollSpeed repeats per second. Unlit, transparent: the glow, then the band over
+// it, then the chevrons.
 Shader "Navigation/Route Ribbon"
 {
     Properties
     {
-        _MainTex ("Mask (R band, G chevrons)", 2D) = "white" {}
+        _MainTex ("Mask (R band, G chevrons, B glow)", 2D) = "white" {}
         _Color ("Color", Color) = (1,1,1,1)
         _ChevronColor ("Chevron color", Color) = (1,1,1,1)
+        _GlowColor ("Glow color", Color) = (1,1,1,0)
         _ScrollSpeed ("Scroll speed (repeats per second)", Float) = 1
     }
     SubShader
@@ -28,6 +31,7 @@ Shader "Navigation/Route Ribbon"
             float4 _MainTex_ST;
             fixed4 _Color;
             fixed4 _ChevronColor;
+            fixed4 _GlowColor;
             float _ScrollSpeed;
 
             struct appdata
@@ -55,12 +59,22 @@ Shader "Navigation/Route Ribbon"
                 return o;
             }
 
+            // top over bottom, both straight (not premultiplied) alpha.
+            fixed4 Over(fixed4 top, fixed4 bottom)
+            {
+                fixed a = top.a + bottom.a * (1 - top.a);
+                fixed3 rgb = (top.rgb * top.a + bottom.rgb * bottom.a * (1 - top.a)) / max(a, 1e-4);
+                return fixed4(rgb, a);
+            }
+
             fixed4 frag (v2f i) : SV_Target
             {
-                fixed2 mask = tex2D(_MainTex, i.uv).rg;
-                fixed3 rgb = lerp(_Color.rgb, _ChevronColor.rgb, mask.g);
-                fixed a = max(mask.r * _Color.a, mask.g) * i.color.a;   // vertex alpha = RouteRibbon's fades
-                return fixed4(rgb, a);
+                fixed3 mask = tex2D(_MainTex, i.uv).rgb;
+                fixed4 c = fixed4(_GlowColor.rgb, mask.b * _GlowColor.a);
+                c = Over(fixed4(_Color.rgb, mask.r * _Color.a), c);
+                c = Over(fixed4(_ChevronColor.rgb, mask.g), c);
+                c.a *= i.color.a;   // vertex alpha = RouteRibbon's fades
+                return c;
             }
             ENDCG
         }

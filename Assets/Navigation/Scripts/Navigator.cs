@@ -109,6 +109,7 @@ public partial class Navigator : MonoBehaviour
 
     static readonly int ColorId = Shader.PropertyToID("_Color");
     static readonly int ChevronColorId = Shader.PropertyToID("_ChevronColor");
+    static readonly int GlowColorId = Shader.PropertyToID("_GlowColor");
 
     public FloorPlan Plan { get; private set; }
     /// <summary>The floor's walkable map, or null: then nothing below uses walls.</summary>
@@ -356,8 +357,9 @@ public partial class Navigator : MonoBehaviour
             Material material = Application.isPlaying ? renderer.material : renderer.sharedMaterial;
             if (material != null)
             {
-                material.SetColor(ColorId, theme.primary);
-                material.SetColor(ChevronColorId, theme.onPrimary);
+                material.SetColor(ColorId, theme.Ribbon);
+                material.SetColor(ChevronColorId, theme.RibbonChevron);
+                material.SetColor(GlowColorId, theme.ribbonGlow);
             }
         }
         if (pin != null)

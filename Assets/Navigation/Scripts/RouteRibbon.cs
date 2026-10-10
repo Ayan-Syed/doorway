@@ -7,6 +7,7 @@ using UnityEngine;
 [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
 public class RouteRibbon : MonoBehaviour
 {
+    [Tooltip("The band's width. The strip is wider (width / BandShare), for the glow round the band's edges.")]
     public float width = 0.55f;
     [Tooltip("Metres per repeat of the texture (one chevron).")]
     public float tileLength = 0.6f;
@@ -20,6 +21,8 @@ public class RouteRibbon : MonoBehaviour
 
     // Longest gap between vertices: the fades are vertex colours, so long stretches need vertices along them.
     const float MaxSegment = 0.5f;
+    // How much of the strip's width the band takes in UI/RouteMask.png; the glow is in the rest (basemap.py).
+    const float BandShare = 0.6f;
 
     Mesh m_Mesh;
     Route m_Route;
@@ -209,7 +212,7 @@ public class RouteRibbon : MonoBehaviour
         m_Uvs.Clear();
         m_Colors.Clear();
         m_Triangles.Clear();
-        float half = width * 0.5f;
+        float half = width / BandShare * 0.5f;
         int last = m_Path.Count - 1;
         // Texture distance runs along the actual (curved) path, starting from the route distance so the chevrons
         // stay put on the floor as the start of the band moves with the user. Less whole repeats, so v stays small
