@@ -39,4 +39,5 @@ public partial class NavigationScreen
     internal void TestArrive() => OnArrived();
     internal void TestOpenSettings() => OpenSettings();
     internal void TestAppearance(int mode) => SetAppearance(mode);
+    internal void TestTapBuilding(CampusData.Building building) => OnBuildingTapped(building);
 }

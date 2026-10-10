@@ -92,8 +92,8 @@ public partial class NavigationScreen
         return nearest;
     }
 
-    // A building on the campus map: the floor's own goes inside; the others get a pin, as there's no map of their
-    // insides yet.
+    // A building on the campus map: the floor's own goes inside, another with an indoor map loads its floor and goes
+    // inside that; the others get a pin, as there's no map of their insides yet.
     void OnBuildingTapped(CampusData.Building building)
     {
         if (m_Step > Step.Place)
@@ -104,7 +104,7 @@ public partial class NavigationScreen
         }
         if (m_Step == Step.Place)
             ShowHome();
-        if (building.indoor)
+        if (building == map.Campus?.indoor || SwitchFloor(FloorOf(building)))
         {
             homeSheet.MoveTo(1, false);   // its rooms come up in the sheet under the floor
             GoInside();
