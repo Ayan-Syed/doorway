@@ -87,11 +87,14 @@ public partial class Localizer
         Note($"source {source.ToString().ToLowerInvariant()}");
     }
 
-    // Each tracked frame: new points into the buffer (depth five times a second, feature points as they come).
+    // Each tracked frame: new points into the buffer, five times a second (depth, or feature points: those are the
+    // cloud's whole set each time, and taken every frame they'd fill the buffer with copies in half a second).
     void CollectScan(double t)
     {
         ChooseSource(t);
-        if (m_Source == ScanSource.Depth && Time.unscaledTime >= m_NextMeasure - 0.01f)
+        if (Time.unscaledTime < m_NextMeasure - 0.01f)
+            return;
+        if (m_Source == ScanSource.Depth)
             CollectDepth(t);
         else if (m_Source == ScanSource.Points)
             CollectPoints(t);

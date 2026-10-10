@@ -10,6 +10,9 @@ public partial class NavigationScreen
 {
     // Null: the real clock.
     internal static float? TestClock;
+    // Null: AR's own tracking (as if tracking, in the editor).
+    internal static bool? TestTracking;
+    internal void TestFrameSnapConfirm() => UpdateSnapConfirm();
 
     static float Now => TestClock ?? Time.unscaledTime;
 

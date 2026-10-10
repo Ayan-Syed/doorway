@@ -73,7 +73,22 @@ public sealed partial class LocalizerEngine
     const float LostSplit = 0.5f;
 
     const float PlateOutlier = 0.01f, ContradictionSeconds = 10f, AgreeSlack = 1.5f;
-    const float SpreadScale = 0.6f, SpreadAfterLoss = 1.2f, LossMemory = 60f;
+    // The scale term (see Measure): the least scale spread believed, the most it may be while sure (metres), and
+    // what a scan needs to fix the place along the hallway (its fit, and FixPoints on a wall across the way within
+    // FixReach).
+    // The least scale spread believed is ARCore's own scale error, as far as known: the cloud's spread can draw tight
+    // on a wrong scale (stress walks with ARCore 8% short), and at 3% that still left them sure and wrong twice
+    // as often as at 4%, which costs about 6 points of sure time (5%: 0.4% wrong, 9 points).
+    const float MinScaleSigma = 0.04f, ScaleGate = 1.5f, FixShare = 0.6f, FixReach = 6f;
+    const int FixPoints = 15, FixScans = 3;
+    int m_FixStreak;
+    float m_FixWalk;
+
+    /// <summary>The scale term in Spread, metres: the scale's spread times the walk since the last absolute fix.</summary>
+    public float ScaleTerm { get; private set; }
+    /// <summary>Walls across the way seen so far (absolute fixes along the hallway).</summary>
+    public int WallFixes { get; private set; }
+    const float SpreadScale = 0.4f, SpreadAfterLoss = 0.8f, LossMemory = 60f;
     double m_LastLoss = double.NegativeInfinity;
     const float SettleSeconds = 1f, FoundSeconds = 5f, WideSeconds = 5f;
     // Steps alone (ARCore not tracking) for this long: not sure any more, until ARCore and the scans are back. A turn
@@ -256,6 +271,7 @@ public sealed partial class LocalizerEngine
         m_Evidence = 0;
         m_NeedsSign = false;
         m_HadEstimate = false;
+        m_FixWalk = 0f;
         int near = Mathf.RoundToInt(count * NearShare);
         m_Filter.SeedNear(0, near, spot, baseYaw, NearFrom, NearReach, SnapHeadingSpread);
         if (others > 0)
@@ -304,6 +320,8 @@ public sealed partial class LocalizerEngine
             return;
         if (tracking && m_Tracking && (camera - m_Camera).sqrMagnitude > 0.0025f)
             m_LastWalk = camera - m_Camera;
+        if (tracking && m_Tracking)
+            m_FixWalk += Vector2.Distance(camera, m_Camera);
         m_Camera = camera;
         if (tracking)
             m_UntrackedSince = -1;
@@ -347,6 +365,16 @@ public sealed partial class LocalizerEngine
         m_Scans++;
         if (m_Scan.LastHitShare >= FitShare)
             m_Evidence++;
+        // A wall across the way, well fitted, in FixScans scans in a row (seen from places ScanDistance apart, so one
+        // lucky fit of a wrong cloud doesn't count): an absolute fix along the hallway (see the scale term).
+        bool facing = m_Scan.LastHitShare >= FixShare && m_LastWalk.sqrMagnitude > 0f &&
+                      m_Scan.HitsFacing(m_Filter, PositionFilter.ToPlan(m_LastWalk, m_Filter.Yaw), FixReach) >= FixPoints;
+        m_FixStreak = facing ? m_FixStreak + 1 : 0;
+        if (m_FixStreak >= FixScans)
+        {
+            m_FixWalk = 0f;
+            WallFixes++;
+        }
         // A scan that fits nowhere near the cloud for long, while sure: it's somewhere else.
         bool misfit = m_Scan.LastPoints >= MisfitPoints && m_Scan.LastHitShare < MisfitShare;
         if (!misfit || State != LocalizerState.Localized)
@@ -431,6 +459,7 @@ public sealed partial class LocalizerEngine
             result = seeded ? Sighted.Placed : Sighted.Used;
         }
         SignUsed?.Invoke(text);
+        m_FixWalk = 0f;   // a plate: an absolute fix
         // A sign that agrees with a cloud that was already sure of itself confirms it. One that had to choose (a cloud
         // started again, moved, or wide) fixes a ring round the sign, and every heading has a place on it: the
         // scans or the walls have to agree with the choice before it's sure.
@@ -501,6 +530,7 @@ public sealed partial class LocalizerEngine
         }
         if (!(length > 0f))
             length = LearntStepLength;
+        m_FixWalk += length;
         m_Filter.StepBlindWorld(heading, length, StepLengthSigma, sigma);
         StepShadows(heading, length, sigma);
         Measure();
@@ -566,13 +596,20 @@ public sealed partial class LocalizerEngine
         if (!float.IsNaN(m_CameraYaw))
             Heading = Mathf.DeltaAngle(0f, m_CameraYaw - m_Filter.Yaw);
         float radius = m_Filter.Radius(0.68f);
-        // Spread is the cloud's 68% radius scaled to hold the error about 68% of the time (the stress walks: the cloud
-        // is wider than the error by a third, except after ARCore has lost tracking, when its jumps are on top).
+        // ARCore's scale isn't known exactly: walked since the last absolute fix, the cloud's place along the way is
+        // off by up to the scale's own spread times that walk (the cloud alone can't show it: every particle walks
+        // it alike but for its scale). In Spread, and sure only while it's under ScaleGate.
+        ScaleTerm = Mathf.Max(m_Filter.ScaleSpread, MinScaleSigma) * m_FixWalk;
+        // Spread is the cloud's 68% radius, scaled, with the scale term on top, to hold the error about 68% of the time
+        // (the stress walks: the cloud is wider than the error, except after ARCore has lost tracking, when its jumps
+        // are on top).
         Spread = radius * (m_Time - m_LastLoss < LossMemory ? SpreadAfterLoss : SpreadScale);
+        Spread = Mathf.Sqrt(Spread * Spread + ScaleTerm * ScaleTerm);
         Confidence = m_Filter.Confidence;
 
         bool blind = m_UntrackedSince >= 0 && m_Time - m_UntrackedSince >= BlindSeconds;
         bool sure = Spread < LocalizedSpread && Confidence > LocalizedConfidence && !jumped && m_Tracking &&
+                    ScaleTerm < ScaleGate &&
                     m_Filter.HeadingSpread < LocalizedHeadingSpread;
         bool loose = Spread > LooseSpread || Confidence < LooseConfidence || m_Filter.HeadingSpread > LooseHeadingSpread;
         WalkItOut(sure && m_Evidence >= EvidenceNeeded && !Doubting && m_Filter.Radius(Wide) < 2f * LocalizedSpread);
@@ -626,6 +663,7 @@ public sealed partial class LocalizerEngine
             : m_Shadows.Count > 0 ? "other doors"
             : m_NeedsSign ? "needs plate"
             : Doubting ? "doubting a plate"
+            : ScaleTerm >= ScaleGate ? "scale"
             : Spread >= LocalizedSpread ? "position spread"
             : m_Filter.HeadingSpread >= LocalizedHeadingSpread ? "heading spread"
             : Confidence <= LocalizedConfidence ? "low confidence"

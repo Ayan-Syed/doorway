@@ -134,6 +134,8 @@ public sealed class PositionFilter
     public Vector2 Estimate { get; private set; }
     public float HeadingOffset { get; private set; }
     public float Scale { get; private set; } = 1f;
+    /// <summary>The weighted standard deviation of the particles' scales.</summary>
+    public float ScaleSpread { get; private set; }
     /// <summary>The plan's yaw as the filter sees it: BaseYaw + HeadingOffset.</summary>
     public float Yaw => BaseYaw + HeadingOffset;
     /// <summary>How far the particles are spread round their mean, metres (root mean square).</summary>
@@ -1125,7 +1127,7 @@ public sealed class PositionFilter
 
     void UpdateEstimate()
     {
-        float total = 0f, scale = 0f, sin = 0f, cos = 0f;
+        float total = 0f, scale = 0f, scale2 = 0f, sin = 0f, cos = 0f;
         Vector2 mean = Vector2.zero;
         for (int i = 0; i < m_Count; i++)
         {
@@ -1139,6 +1141,7 @@ public sealed class PositionFilter
             sin += Mathf.Sin(r) * w;
             cos += Mathf.Cos(r) * w;
             scale += m_Scale[i] * w;
+            scale2 += m_Scale[i] * m_Scale[i] * w;
         }
         if (total <= 0f)
             return;
@@ -1151,6 +1154,7 @@ public sealed class PositionFilter
         float resultant = Mathf.Clamp(Mathf.Sqrt(sin * sin + cos * cos) / total, 1e-6f, 1f);
         HeadingSpread = Mathf.Sqrt(-2f * Mathf.Log(resultant)) * Mathf.Rad2Deg;
         Scale = scale / total;
+        ScaleSpread = Mathf.Sqrt(Mathf.Max(0f, scale2 / total - Scale * Scale));
 
         // The mean of a cloud split by a wall can sit in the wall: then the particle nearest it stands in.
         Vector2 estimate = mode;

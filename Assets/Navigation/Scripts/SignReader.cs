@@ -94,6 +94,19 @@ public class SignReader : MonoBehaviour
     }
 
     /// <summary>The plates that can count: the plan's sign texts (PlanSign.text). Nothing counts until this is set.</summary>
+    /// <summary>Picks the camera's image size for reading (the biggest CPU image up to 1920 x 1080; ARCore starts at
+    /// 640 x 480) on the next camera frame while not reading. Call it as AR first starts (the Start or Align step):
+    /// switching can restart the camera and make tracking blip, so reading itself never switches it. Once a run.</summary>
+    public void PrepareCamera()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (m_ConfigurationChosen || m_Preparing || cameraManager == null)
+            return;
+        m_Preparing = true;
+        cameraManager.frameReceived += OnPrepareFrame;
+#endif
+    }
+
     public void SetTexts(IEnumerable<string> validTexts)
     {
         m_Texts.Clear();
@@ -507,7 +520,7 @@ public class SignReader : MonoBehaviour
     Listener m_Listener;
     IntPtr m_Process;
     int m_ImageRotation, m_Errors;
-    bool m_WasReading, m_Broken, m_ConfigurationChosen, m_Converting, m_InFlight, m_PosePending, m_ShapeWarned, m_DepthShapeWarned, m_DepthSupportLogged;
+    bool m_WasReading, m_Broken, m_ConfigurationChosen, m_Converting, m_InFlight, m_PosePending, m_ShapeWarned, m_DepthShapeWarned, m_DepthSupportLogged, m_Preparing;
     float[] m_Depth;
     XRCpuImage.AsyncConversion m_Conversion;
     // The frame being converted or read: there's only ever one.
@@ -630,8 +643,6 @@ public class SignReader : MonoBehaviour
         m_NextCapture = Time.unscaledTime + 1f / Mathf.Max(rate, 0.1f);
         if (cameraManager == null || arCamera == null || ARSession.state != ARSessionState.SessionTracking)
             return;
-        if (!m_ConfigurationChosen)
-            ChooseCameraConfiguration();
         if (!cameraManager.TryGetIntrinsics(out XRCameraIntrinsics intrinsics) || !cameraManager.TryAcquireLatestCpuImage(out XRCpuImage image))
             return;
         using (image)
@@ -807,6 +818,8 @@ public class SignReader : MonoBehaviour
                 m_InFlight = true;
                 m_SentAt = Time.unscaledTime;
             }
+            else
+                m_NextCapture = Time.unscaledTime;   // Java was still finishing the last frame's report: next frame
         }
         finally
         {
@@ -816,6 +829,23 @@ public class SignReader : MonoBehaviour
 
     // Once per session: the camera's biggest CPU image up to 1920 x 1080 (ARCore's default is 640 x 480, too small
     // for a plate down the hallway). Only once, as changing it can restart the camera.
+    // PrepareCamera's: on camera frames until the configuration is known, never while reading.
+    void OnPrepareFrame(ARCameraFrameEventArgs args)
+    {
+        if (reading || ARSession.state != ARSessionState.SessionTracking)
+            return;
+        ChooseCameraConfiguration();
+        if (m_ConfigurationChosen)
+            StopPreparing();
+    }
+
+    void StopPreparing()
+    {
+        if (m_Preparing && cameraManager != null)
+            cameraManager.frameReceived -= OnPrepareFrame;
+        m_Preparing = false;
+    }
+
     void ChooseCameraConfiguration()
     {
         try
@@ -861,6 +891,7 @@ public class SignReader : MonoBehaviour
 
     void OnDestroy()
     {
+        StopPreparing();
         if (m_Converting)
         {
             m_Conversion.Dispose();
