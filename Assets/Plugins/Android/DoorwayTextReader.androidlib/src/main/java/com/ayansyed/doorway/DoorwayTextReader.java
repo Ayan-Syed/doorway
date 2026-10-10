@@ -80,15 +80,20 @@ public final class DoorwayTextReader
             InputImage image = InputImage.fromByteArray(nv21, width, height, rotationDegrees, InputImage.IMAGE_FORMAT_NV21);
             reader.process(image).addOnCompleteListener(callbacks, task ->
             {
-                // Free before reporting, so Unity can send the next frame as soon as it hears. ML Kit is done with
-                // the pixels by now.
-                busy.set(false);
-                if (recognizer == null)
-                    return;   // closed meanwhile
-                if (task.isSuccessful())
-                    listener.onText(pack(task.getResult(), width, height, rotationDegrees));
-                else
-                    listener.onError(describe(task.getException()));
+                // Reported before the next frame is let in, so a result always belongs to the frame Unity sent last.
+                try
+                {
+                    if (recognizer == null)
+                        return;   // closed meanwhile
+                    if (task.isSuccessful())
+                        listener.onText(pack(task.getResult(), width, height, rotationDegrees));
+                    else
+                        listener.onError(describe(task.getException()));
+                }
+                finally
+                {
+                    busy.set(false);
+                }
             });
             return true;
         }

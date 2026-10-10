@@ -138,8 +138,9 @@ public sealed class WallMatcher
     public int Weigh(PositionFilter filter, IReadOnlyList<WallObservation> walls, Vector2 camera)
     {
         m_Used.Clear();
-        foreach (WallObservation wall in walls)
+        for (int i = 0; i < walls.Count; i++)   // indexed: a foreach over the interface boxes its enumerator
         {
+            WallObservation wall = walls[i];
             if (wall.length >= MinLength && DistanceToSegment(camera, wall) <= MaxRange)
                 m_Used.Add(wall);
         }

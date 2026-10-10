@@ -55,6 +55,41 @@ public sealed class ScanMatcher
     public float LastHitShare { get; private set; }
     /// <summary>log Σ weight × likelihood of the last scan over the cloud weighed (tempered, trusted).</summary>
     public double LastLogMarginal { get; private set; }
+    int m_Best = -1, m_BestCount;
+
+    /// <summary>Of the last scan, as the best particle puts it on the plan: the points on a wall (within HitDistance)
+    /// that faces along planDirection (its normal within FacingAngle of it, either way), within reach metres. Such a
+    /// wall across the way (a corridor's end, a junction's far side, a door's reveal) fixes where along the hallway
+    /// the user is, which walls alongside can't.</summary>
+    public int HitsFacing(PositionFilter filter, Vector2 planDirection, float reach)
+    {
+        if (m_Best < 0 || m_Best >= filter.Count || planDirection.sqrMagnitude < 1e-6f)
+            return 0;
+        planDirection.Normalize();
+        float r = -filter.ParticleYaw(m_Best) * Mathf.Deg2Rad, scale = filter.ParticleScale(m_Best);
+        float c = Mathf.Cos(r) * scale, s = Mathf.Sin(r) * scale, cos = Mathf.Cos(FacingAngle * Mathf.Deg2Rad);
+        Vector2 at = filter.ParticlePosition(m_Best);
+        int count = 0;
+        for (int j = 0; j < m_BestCount; j++)
+        {
+            float px = m_DX[j] * c + m_DZ[j] * s, pz = -m_DX[j] * s + m_DZ[j] * c;
+            if (px * px + pz * pz > reach * reach)
+                continue;
+            float x = at.x + px, z = at.y + pz;
+            if (m_Field.Centimetres(x, z) * 0.01f >= HitDistance)
+                continue;
+            // The wall's normal: the distance field's gradient a little way out.
+            float gx = m_Field.Centimetres(x + GradientStep, z) - m_Field.Centimetres(x - GradientStep, z);
+            float gz = m_Field.Centimetres(x, z + GradientStep) - m_Field.Centimetres(x, z - GradientStep);
+            float g = Mathf.Sqrt(gx * gx + gz * gz);
+            if (g > 0f && Mathf.Abs((gx * planDirection.x + gz * planDirection.y) / g) >= cos)
+                count++;
+        }
+        return count;
+    }
+
+    const float FacingAngle = 30f, GradientStep = 0.2f;
+
     /// <summary>How much the last scan was trusted (see Weigh).</summary>
     public float LastTrust { get; private set; }
     /// <summary>Scans weighed so far.</summary>
@@ -138,6 +173,8 @@ public sealed class ScanMatcher
             return false;
         LastAverage = average;
         Statistics(filter, best, n);
+        m_Best = best;
+        m_BestCount = n;
         // A scan even the best pose explains poorly (boxes, people, glass, walls that aren't where the plan has them)
         // says less: its outliers come in clumps that z_rand, made for scattered ones, doesn't cover, and a clump
         // that happens to line up with another wall pulls the cloud there. So it's weighed in proportion to how much

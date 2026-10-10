@@ -197,7 +197,10 @@ public sealed partial class LocalizerEngine
     {
         if (m_Shadows.Count == 0)
             return;
-        m_Shadows.RemoveAll(s => (s.filter.Estimate - m_Filter.Estimate).sqrMagnitude < MergeDistance * MergeDistance);
+        // (Reverse loops, not RemoveAll: its lambda would allocate on every update.)
+        for (int k = m_Shadows.Count - 1; k >= 0; k--)
+            if ((m_Shadows[k].filter.Estimate - m_Filter.Estimate).sqrMagnitude < MergeDistance * MergeDistance)
+                m_Shadows.RemoveAt(k);
         if (m_Shadows.Count == 0)
         {
             AskReason = null;
@@ -211,7 +214,9 @@ public sealed partial class LocalizerEngine
                 best = s;
         if (best != null)
             SwapIn(best);
-        m_Shadows.RemoveAll(s => MainLog - LogOf(s) >= DecideLog);
+        for (int k = m_Shadows.Count - 1; k >= 0; k--)
+            if (MainLog - LogOf(m_Shadows[k]) >= DecideLog)
+                m_Shadows.RemoveAt(k);
         if (m_Shadows.Count == 0)
             AskReason = null;
         else if (m_ShadowWalked >= AmbiguousWalk)

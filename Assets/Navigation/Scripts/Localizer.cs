@@ -108,9 +108,9 @@ public partial class Localizer : MonoBehaviour
         if (navigator == null)
             return;
         navigator.Load();
-        m_Location = FindAnyObjectByType<UserLocation>();
         if (navigator.Walkable == null)
-            return;   // no walkable map: GPS only, every walk starts at a door
+            return;   // no walkable map: GPS only, every walk starts at a door (and no entrance prompt: nothing to snap)
+        m_Location = FindAnyObjectByType<UserLocation>();
         if (walls != null)
         {
             try
@@ -184,6 +184,26 @@ public partial class Localizer : MonoBehaviour
         EntrancePrompt = false;
         if (door == null || navigator == null || Engine() == null)
             return;
+        // ARCore may not be running yet (outdoors it's off): the snap waits for the first tracked frame, so its
+        // camera pose is the one at the door, not a stale one from before AR came on.
+        m_PendingSnap = door;
+        m_SnappedTo = door;
+        m_SnappedAt = Time.unscaledTime;
+        navigator.KeepAR = true;
+        navigator.KeepVerticalPlanes = true;
+        if (navigator.IsTracking)
+            CompleteSnap();
+    }
+
+    /// <summary>A door was picked and the snap waits for ARCore to track (see SnapToDoor).</summary>
+    public bool SnapPending => m_PendingSnap != null;
+
+    PlanDoor m_PendingSnap;
+
+    void CompleteSnap()
+    {
+        PlanDoor door = m_PendingSnap;
+        m_PendingSnap = null;
         double t = Now;
         navigator.ResetFloor();
         navigator.DoorPose(door, out Vector2 spot, out float yaw);
@@ -204,8 +224,6 @@ public partial class Localizer : MonoBehaviour
         }
         m_Log?.EndRow();
         m_Engine.Snap(t, spot, yaw, camera, m_Alternatives, m_AlternativeYaws);
-        m_SnappedTo = door;
-        m_SnappedAt = Time.unscaledTime;
         Publish();
         ApplyIndoors();
     }
@@ -261,6 +279,7 @@ public partial class Localizer : MonoBehaviour
     // Back to GPS, AR off.
     public void GoOutdoors()
     {
+        m_PendingSnap = null;   // a snap still waiting for ARCore is called off
         bool was = Indoors;
         if (m_Engine != null && was)
         {
@@ -314,6 +333,8 @@ public partial class Localizer : MonoBehaviour
     {
         if (navigator == null)
             return;
+        if (m_PendingSnap != null && navigator.IsTracking)
+            CompleteSnap();
         if (!Indoors)
         {
             UpdateOutdoors();
@@ -442,7 +463,7 @@ public partial class Localizer : MonoBehaviour
     {
         if (signReader != null && signReader.reading != tracking)
             signReader.reading = tracking;
-        bool counting = m_Location == null || !m_Location.IsAsking;
+        bool counting = (m_Location == null || !m_Location.IsAsking) && tracking;   // tracking: the camera dialog is done
         if (steps != null && steps.running != counting)
             steps.running = counting;
     }
@@ -453,14 +474,23 @@ public partial class Localizer : MonoBehaviour
         FlushGpsHistory();
     }
 
+    // Into the background: save. Back after a while indoors: the user may have walked with the phone locked, so the
+    // cloud spreads out (a relocalization, logged) rather than staying sure where it was left.
     void OnApplicationPause(bool paused)
     {
+        double t = Now;
         if (paused)
         {
+            m_PausedAt = t;
             m_Log?.Flush();
             PlayerPrefs.Save();
+            return;
         }
+        if (Navigator.LongPause(t - m_PausedAt))
+            Relocalize();
     }
+
+    double m_PausedAt = double.NaN;
 
     static double Now => Time.realtimeSinceStartupAsDouble;
 

@@ -138,10 +138,9 @@ public partial class NavigationScreen
         // and the screen stays on: asleep, the position would be lost.
         if (Application.isPlaying)
         {
-            bool ar = step >= Step.Start && step <= Step.Guide;
+            bool ar = StepWantsAR(step);
             bool inside = m_Source != null && m_Source.State != LocalizerState.Outdoors;
-            if (!inside)
-                navigator.SetARActive(ar);
+            navigator.SetARActive(ar || m_SnapOpen);   // indoors the Localizer's KeepAR holds it on regardless
             Screen.sleepTimeout = ar || inside ? SleepTimeout.NeverSleep : SleepTimeout.SystemSetting;
         }
         // With Depth, the AR camera's feed shows through behind the UI.
@@ -149,6 +148,9 @@ public partial class NavigationScreen
             uiCamera.clearFlags = onMap ? CameraClearFlags.SolidColor : CameraClearFlags.Depth;
         UpdateGpsPuck();
     }
+
+    // AR for the step itself: from picking a start to the end of the walk.
+    static bool StepWantsAR(Step step) => step >= Step.Start && step <= Step.Guide;
 
     // Panels fade in (Update raises the alpha); they hide at once.
     void SetPanel(CanvasGroup panel, bool visible)

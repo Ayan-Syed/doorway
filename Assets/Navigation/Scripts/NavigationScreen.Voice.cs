@@ -454,13 +454,19 @@ public partial class NavigationScreen
 
     void WhereAmI()
     {
-        Vector2? at = m_Step == Step.Guide ? navigator.UserPosition : GpsUsable() ? location.Position : (Vector2?)null;
+        // Guiding: the navigator's position. Indoors and sure: the localizer's. Otherwise GPS, if it's usable.
+        IIndoorSource indoor = IndoorSource;
+        bool sureIndoors = indoor != null && Navigator.SureOfPosition(indoor.State, indoor.Spread)
+                           && indoor.State != LocalizerState.Outdoors;
+        Vector2? at = m_Step == Step.Guide ? navigator.UserPosition
+            : sureIndoors ? indoor.Position
+            : GpsUsable() ? location.Position : (Vector2?)null;
         if (at == null)
         {
             Ask(VoiceAsk.Location, "I can't tell where you are yet. Tell me a room number or sign you can see.");
             return;
         }
-        bool outside = m_Step != Step.Guide && Outside(at.Value, location.Accuracy);   // off Guide, at is the GPS fix
+        bool outside = m_Step != Step.Guide && !sureIndoors && Outside(at.Value, location.Accuracy);
         PlanPlace nearest = null;
         float best = float.PositiveInfinity;
         foreach (PlanPlace p in Plan.places)

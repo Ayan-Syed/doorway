@@ -117,7 +117,11 @@ public class FlowTests
     }
 
     [TearDown]
-    public void NothingLogged() => LogAssert.NoUnexpectedReceived();
+    public void NothingLogged()
+    {
+        NavigationScreen.TestTracking = null;
+        LogAssert.NoUnexpectedReceived();
+    }
 
     void Frame(float seconds = 0.1f)
     {
@@ -212,6 +216,30 @@ public class FlowTests
         m_Screen.TestArrive();
         Assert.AreEqual("Arrived", Step);
         Assert.AreEqual("You've arrived", m_Screen.arrivedTitle.text);
+    }
+
+    [Test]
+    public void ConfirmWaitsForTracking()
+    {
+        NavigationScreen.TestTracking = false;
+        Tap(m_Screen.insideButton);
+        Frame();
+        Assert.IsTrue(m_Screen.SnapCardOpen);
+        Assert.IsFalse(m_Screen.snapConfirm.interactable, "no snap on a stale pose");
+        Assert.AreEqual("Starting camera…", m_Screen.snapConfirmLabel.text);
+        Assert.IsTrue(m_Screen.snapSpinner.gameObject.activeSelf);
+        Tap(m_Screen.snapConfirm);
+        Assert.IsNull(m_Fake.Snapped, "Confirm does nothing until AR tracks");
+        Assert.IsTrue(m_Screen.SnapCardOpen);
+
+        NavigationScreen.TestTracking = true;
+        Frame();
+        Assert.IsTrue(m_Screen.snapConfirm.interactable);
+        Assert.AreEqual("Confirm", m_Screen.snapConfirmLabel.text);
+        Assert.IsFalse(m_Screen.snapSpinner.gameObject.activeSelf);
+        Tap(m_Screen.snapConfirm);
+        Assert.IsNotNull(m_Fake.Snapped);
+        Assert.IsFalse(m_Screen.SnapCardOpen);
     }
 
     [Test]
@@ -363,9 +391,29 @@ public class FlowTests
         MethodInfo pause = typeof(Navigator).GetMethod("OnApplicationPause", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.IsNotNull(pause, "Navigator.OnApplicationPause");
         pause.Invoke(m_Screen.navigator, new object[] { true });
+        PausedFor(10.0);   // long enough that the phone may have gone somewhere
         pause.Invoke(m_Screen.navigator, new object[] { false });
         Frame();
         Assert.IsTrue(m_Screen.navigator.ShouldRealign);
         Assert.AreEqual("Re-align at the nearest door", m_Screen.statusText.text);
+    }
+
+    [Test]
+    public void AShortPauseMidWalkKeepsGuiding()
+    {
+        WalkTo121();
+        MethodInfo pause = typeof(Navigator).GetMethod("OnApplicationPause", BindingFlags.Instance | BindingFlags.NonPublic);
+        pause.Invoke(m_Screen.navigator, new object[] { true });   // a permission dialog, say: back at once
+        pause.Invoke(m_Screen.navigator, new object[] { false });
+        Frame();
+        Assert.IsFalse(m_Screen.navigator.ShouldRealign);
+    }
+
+    // Moves the pause's start back, as if the app had been away that long.
+    void PausedFor(double seconds)
+    {
+        FieldInfo at = typeof(Navigator).GetField("m_PausedAt", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.IsNotNull(at, "Navigator.m_PausedAt");
+        at.SetValue(m_Screen.navigator, (double)at.GetValue(m_Screen.navigator) - seconds);
     }
 }

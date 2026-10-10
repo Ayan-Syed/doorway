@@ -1,17 +1,15 @@
 using System;
 using UnityEngine;
 #if UNITY_ANDROID && !UNITY_EDITOR
-using System.Collections.Concurrent;
 using UnityEngine.Android;
-using UnityEngine.Scripting;
 #endif
 
 // Counts the user's steps and says which way the phone faces, for dead reckoning between fixes. Steps come from the
 // phone's own step detector (Android's TYPE_STEP_DETECTOR, which needs the ACTIVITY_RECOGNITION permission from
 // Android 10); refused, or with no such sensor, from peaks in the up-and-down acceleration instead. The heading is
 // from the rotation vector (gyroscope, accelerometer and compass fused). Sensors run only while `running` is on and
-// the app is in front. Java (DoorwayStepSensor) reports on its own thread into a queue that Update empties. Does
-// nothing in the editor.
+// the app is in front. Java (DoorwayStepSensor) keeps the events on its own thread and Update collects them in one
+// call a frame. Does nothing in the editor.
 public class StepCounter : MonoBehaviour
 {
     [Tooltip("Listen to the sensors while on. Off, they're unregistered.")]
@@ -83,34 +81,94 @@ public class StepCounter : MonoBehaviour
         }
     }
 
+    void Step()
+    {
+        Steps++;
+        Stepped?.Invoke();
+    }
+
+    /// <summary>Asks for the activity-recognition permission now, at a calm moment (the UI calls it on the Align
+    /// screen and as the snap card opens), so the dialog never comes up mid-guidance. Does nothing once it has been
+    /// granted or refused this run of the app, or while the dialog is up; a dismissed dialog can be asked again. A
+    /// StepCounter that starts running after this never shows the dialog itself.</summary>
+    public static void RequestEarly()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            TimeOutAsk();
+            int answer = s_Answer;
+            if (answer == Asking || answer == Granted || answer == Denied)
+                return;
+            if (Allowed())
+                s_Answer = Granted;
+            else
+                Ask();
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[Navigation] Steps: couldn't ask for activity recognition ({e.Message}).");
+        }
+#endif
+    }
+
 #if UNITY_ANDROID && !UNITY_EDITOR
     const string SensorClass = "com.ayansyed.doorway.DoorwayStepSensor";
     const string ActivityRecognition = "android.permission.ACTIVITY_RECOGNITION";
     // The step detector needs the permission from Android 10 (API 29).
     const int PermissionSdk = 29;
-    const int Idle = -1, Asking = 0, Granted = 1, Denied = 2;
+    // A dialog with no answer after this many seconds (covered by another app's, say) counts as dismissed.
+    const float AskTimeout = 20f;
+    // Never asked this run; dialog up; and the answers. Dismissed (or timed out) may be asked again; Denied isn't.
+    const int Idle = 0, Asking = 1, Granted = 2, Denied = 3, Dismissed = 4;
+    // DoorwayStepSensor.drain(): its header, and the floats per acceleration sample.
+    const int Header = 6, Sample = 4;
 
-    readonly ConcurrentQueue<Reading> m_Readings = new ConcurrentQueue<Reading>();
-    readonly PeakDetector m_Peaks = new PeakDetector();
+    // Shared by RequestEarly and the counter. Set on Android's thread by the permission callbacks, so only a number.
+    static volatile int s_Answer = Idle;
+    static float s_AskedAt;
+    static int s_Sdk = -1;
+
+    PeakDetector m_Peaks = new PeakDetector();
     AndroidJavaObject m_Sensor;
-    Listener m_Listener;
     bool m_WasRunning, m_Broken, m_Listening, m_Decided, m_UseDetector;
-    // Set on Android's thread by the permission callbacks, so it's only ever a number; read in Update.
-    volatile int m_Answer = Idle;
+    int m_SeenAnswer = -1;
     Quaternion m_Rotation = Quaternion.identity;
+
+    static bool Allowed()
+    {
+        if (s_Sdk < 0)
+            using (var version = new AndroidJavaClass("android.os.Build$VERSION"))
+                s_Sdk = version.GetStatic<int>("SDK_INT");
+        return s_Sdk < PermissionSdk || Permission.HasUserAuthorizedPermission(ActivityRecognition);
+    }
+
+    static void Ask()
+    {
+        s_Answer = Asking;
+        s_AskedAt = Time.realtimeSinceStartup;
+        var callbacks = new PermissionCallbacks();
+        callbacks.PermissionGranted += _ => s_Answer = Granted;
+        callbacks.PermissionDenied += _ => s_Answer = Denied;
+#pragma warning disable CS0618
+        callbacks.PermissionDeniedAndDontAskAgain += _ => s_Answer = Denied;
+#pragma warning restore CS0618
+        callbacks.PermissionRequestDismissed += _ => s_Answer = Dismissed;
+        Permission.RequestUserPermission(ActivityRecognition, callbacks);
+    }
+
+    static void TimeOutAsk()
+    {
+        if (s_Answer == Asking && Time.realtimeSinceStartup - s_AskedAt > AskTimeout)
+            s_Answer = Dismissed;
+    }
 
     void Update()
     {
-        while (m_Readings.TryDequeue(out Reading reading))
-            Handle(reading);
+        if (m_Listening)
+            Drain();
 
-        int answer = m_Answer;
-        if (answer == Granted || answer == Denied)
-        {
-            m_Answer = Idle;
-            Decide(answer == Granted);
-        }
-
+        TimeOutAsk();
         if (running != m_WasRunning)
         {
             m_WasRunning = running;
@@ -119,6 +177,9 @@ public class StepCounter : MonoBehaviour
             else
                 Listen(false);
         }
+        // An answer that came in while running (or a later grant, from RequestEarly): decide again.
+        if (running && m_Sensor != null && s_Answer != m_SeenAnswer)
+            Resolve(false);
     }
 
     void Begin()
@@ -129,34 +190,14 @@ public class StepCounter : MonoBehaviour
         {
             if (m_Sensor == null)
             {
-                m_Listener = new Listener(m_Readings);
                 using (var player = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
                 using (var activity = player.GetStatic<AndroidJavaObject>("currentActivity"))
-                    m_Sensor = new AndroidJavaObject(SensorClass, activity, m_Listener);
+                    m_Sensor = new AndroidJavaObject(SensorClass, activity);
             }
-            if (m_Decided)
-            {
+            if (m_Decided && s_Answer == m_SeenAnswer)
                 Listen(true);
-                return;
-            }
-            if (m_Answer == Asking)
-                return;   // the dialog is up
-            int sdk;
-            using (var sensorClass = new AndroidJavaClass(SensorClass))
-                sdk = sensorClass.CallStatic<int>("sdk");
-            if (sdk < PermissionSdk || Permission.HasUserAuthorizedPermission(ActivityRecognition))
-            {
-                Decide(true);
-                return;
-            }
-            m_Answer = Asking;
-            var callbacks = new PermissionCallbacks();
-            callbacks.PermissionGranted += _ => m_Answer = Granted;
-            callbacks.PermissionDenied += _ => m_Answer = Denied;
-#pragma warning disable CS0618
-            callbacks.PermissionDeniedAndDontAskAgain += _ => m_Answer = Denied;
-#pragma warning restore CS0618
-            Permission.RequestUserPermission(ActivityRecognition, callbacks);
+            else
+                Resolve(true);
         }
         catch (Exception e)
         {
@@ -164,28 +205,62 @@ public class StepCounter : MonoBehaviour
         }
     }
 
-    // Detector or fallback, once per run of the app: asked once, the answer stands.
-    void Decide(bool allowed)
+    // From the permission's state: the detector, the fallback, or wait for the dialog. mayAsk: only the first start,
+    // and only if nothing was asked this run.
+    void Resolve(bool mayAsk)
     {
-        if (m_Broken || m_Sensor == null)
-            return;
         try
         {
-            m_Decided = true;
-            m_UseDetector = allowed && m_Sensor.Call<bool>("hasStepDetector");
-            Available = m_UseDetector;
-            Fallback = !m_UseDetector && m_Sensor.Call<bool>("hasLinearAcceleration");
-            if (!m_Sensor.Call<bool>("hasRotationVector"))
-                Debug.LogWarning("[Navigation] Steps: no rotation vector sensor, so no heading.");
-            Debug.Log($"[Navigation] Steps: {(Available ? "step detector" : Fallback ? "acceleration peaks" : "no way to count")}" +
-                      $"{(allowed ? "" : " (activity recognition refused)")}.");
-            if (running)
-                Listen(true);
+            int answer = s_Answer;
+            m_SeenAnswer = answer;
+            if (answer == Asking)
+                return;   // the dialog is up: decide when it answers
+            if (answer == Granted)
+                Decide(true);
+            else if (answer == Denied || answer == Dismissed)
+                Decide(false);
+            else if (Allowed())
+            {
+                s_Answer = m_SeenAnswer = Granted;
+                Decide(true);
+            }
+            else if (mayAsk)
+            {
+                Ask();
+                m_SeenAnswer = Asking;
+            }
+            else
+                Decide(false);
         }
         catch (Exception e)
         {
             Fail(e.Message);
         }
+    }
+
+    // Detector or fallback. Again on a later grant: the counting switches over and the step count carries on.
+    void Decide(bool allowed)
+    {
+        if (m_Broken || m_Sensor == null)
+            return;
+        bool detector = allowed && m_Sensor.Call<bool>("hasStepDetector");
+        if (m_Decided && detector == m_UseDetector)
+            return;
+        m_Decided = true;
+        m_UseDetector = detector;
+        Available = detector;
+        Fallback = !detector && m_Sensor.Call<bool>("hasLinearAcceleration");
+        if (!m_Sensor.Call<bool>("hasRotationVector"))
+            Debug.LogWarning("[Navigation] Steps: no rotation vector sensor, so no heading.");
+        Debug.Log($"[Navigation] Steps: {(Available ? "step detector" : Fallback ? "acceleration peaks" : "no way to count")}" +
+                  $"{(allowed ? "" : " (activity recognition not granted)")}.");
+        if (m_Listening)
+        {
+            m_Listening = false;
+            Listen(true);   // start() again switches the sensors
+        }
+        else if (running)
+            Listen(true);
     }
 
     void Listen(bool on)
@@ -195,7 +270,11 @@ public class StepCounter : MonoBehaviour
         try
         {
             if (on)
+            {
+                // start() restarts the samples' clock, so the detector starts afresh too.
+                m_Peaks = new PeakDetector();
                 m_Sensor.Call("start", m_UseDetector);
+            }
             else
                 m_Sensor.Call("stop");
             m_Listening = on;
@@ -216,32 +295,41 @@ public class StepCounter : MonoBehaviour
         Debug.LogWarning($"[Navigation] Steps off: {why}");
     }
 
-    void Handle(Reading reading)
+    // Everything the sensors said since last frame, in one call (DoorwayStepSensor.drain).
+    void Drain()
     {
-        switch (reading.kind)
+        float[] data;
+        try
         {
-            case Kind.Step:
-                if (m_UseDetector)
-                    Step();
-                break;
-            case Kind.Rotation:
-                m_Rotation = reading.rotation;
-                Heading = HeadingFromRotation(reading.rotation);
-                break;
-            case Kind.Acceleration:
-                if (!m_UseDetector && m_Peaks.Add(reading.time, VerticalAcceleration(reading.acceleration, m_Rotation)))
-                    Step();
-                break;
+            data = m_Sensor.Call<float[]>("drain");
         }
+        catch (Exception e)
+        {
+            Fail(e.Message);
+            return;
+        }
+        if (data == null || data.Length < Header)
+            return;
+        if (data[1] > 0.5f)
+        {
+            m_Rotation = new Quaternion(data[2], data[3], data[4], data[5]);
+            Heading = HeadingFromRotation(m_Rotation);
+        }
+        int steps = m_UseDetector ? Mathf.RoundToInt(data[0]) : 0;
+        if (!m_UseDetector)
+        {
+            for (int i = Header; i + Sample <= data.Length; i += Sample)
+            {
+                var acceleration = new Vector3(data[i], data[i + 1], data[i + 2]);
+                if (m_Peaks.Add(data[i + 3], VerticalAcceleration(acceleration, m_Rotation)))
+                    steps++;
+            }
+        }
+        for (int i = 0; i < steps; i++)
+            Step();
     }
 
-    void Step()
-    {
-        Steps++;
-        Stepped?.Invoke();
-    }
-
-    // Sensors stop with the app in the background (and the queue with them), and start again on return.
+    // Sensors stop with the app in the background, and start again on return.
     void OnApplicationPause(bool paused)
     {
         if (paused)
@@ -255,54 +343,6 @@ public class StepCounter : MonoBehaviour
         Listen(false);
         m_Sensor?.Dispose();
         m_Sensor = null;
-    }
-
-    enum Kind { Step, Rotation, Acceleration }
-
-    readonly struct Reading
-    {
-        public readonly Kind kind;
-        public readonly Quaternion rotation;
-        public readonly Vector3 acceleration;
-        public readonly double time;
-
-        public Reading(Kind kind, Quaternion rotation, Vector3 acceleration, double time)
-        {
-            this.kind = kind;
-            this.rotation = rotation;
-            this.acceleration = acceleration;
-            this.time = time;
-        }
-    }
-
-    // DoorwayStepSensor.Listener, implemented here (the names are Java's). Called on the sensors' own thread, so it
-    // only queues.
-    sealed class Listener : AndroidJavaProxy
-    {
-        readonly ConcurrentQueue<Reading> m_Readings;
-
-        public Listener(ConcurrentQueue<Reading> readings) : base(SensorClass + "$Listener")
-        {
-            m_Readings = readings;
-        }
-
-        [Preserve]
-        public void onStep()
-        {
-            m_Readings.Enqueue(new Reading(Kind.Step, default, default, 0));
-        }
-
-        [Preserve]
-        public void onRotation(float x, float y, float z, float w)
-        {
-            m_Readings.Enqueue(new Reading(Kind.Rotation, new Quaternion(x, y, z, w), default, 0));
-        }
-
-        [Preserve]
-        public void onAcceleration(float x, float y, float z, long timestamp)
-        {
-            m_Readings.Enqueue(new Reading(Kind.Acceleration, default, new Vector3(x, y, z), timestamp * 1e-9));
-        }
     }
 #endif
 }

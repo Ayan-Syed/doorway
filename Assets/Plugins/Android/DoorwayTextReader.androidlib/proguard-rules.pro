@@ -2,4 +2,3 @@
 -keep class com.ayansyed.doorway.DoorwayTextReader { *; }
 -keep interface com.ayansyed.doorway.DoorwayTextReader$Listener { *; }
 -keep class com.ayansyed.doorway.DoorwayStepSensor { *; }
--keep interface com.ayansyed.doorway.DoorwayStepSensor$Listener { *; }

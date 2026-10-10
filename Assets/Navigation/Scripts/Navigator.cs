@@ -650,20 +650,32 @@ public partial class Navigator : MonoBehaviour
     }
 
     // Back from the background mid-walk: nothing says where the phone went meanwhile, or whether ARCore will find
-    // its map again, so the user is asked to line up again.
+    // its map again, so the user is asked to line up again; but not after a moment away (a permission dialog pauses
+    // the app too).
     void OnApplicationPause(bool paused)
     {
+        double now = Time.realtimeSinceStartupAsDouble;
         if (paused)
         {
             m_PausedWhileGuiding = IsGuiding;
+            m_PausedAt = now;
             m_Log?.Flush();
         }
         else if (m_PausedWhileGuiding && IsGuiding)
         {
             m_PausedWhileGuiding = false;
-            RequestRealign("resumed");
+            if (LongPause(now - m_PausedAt))
+                RequestRealign("resumed");
         }
     }
+
+    double m_PausedAt = double.NaN;
+
+    /// <summary>Paused long enough that the phone may have gone somewhere: ShortPauseSeconds or more (NaN: never
+    /// paused, so no).</summary>
+    public static bool LongPause(double seconds) => seconds >= ShortPauseSeconds;
+
+    public const float ShortPauseSeconds = 3f;
 
     // Back from Settings or a permission dialog: give ARCore a moment before calling the camera refused.
     void OnApplicationFocus(bool focused)

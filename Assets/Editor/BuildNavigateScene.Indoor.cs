@@ -52,8 +52,12 @@ public static partial class BuildNavigateScene
         screen.snapHint = TextIn(TopBand("Hint", card, 128f, 92f, 48f, 48f),
             "Stand just inside the doors, back to them, phone up", s_Regular, 36, s_T.onSurfaceVariant, TextAnchor.UpperLeft);
         screen.snapHint.lineSpacing = 1.1f;
-        screen.snapConfirm = WideButton(TopBand("Confirm", card, 232f, 120f, 48f, 48f), "Confirm", s_T.primary,
-            s_T.onPrimary, out _);
+        RectTransform confirm = TopBand("Confirm", card, 232f, 120f, 48f, 48f);
+        screen.snapConfirm = WideButton(confirm, "Confirm", s_T.primary, s_T.onPrimary, out screen.snapConfirmLabel);
+        // Left of the label while the camera starts ("Starting camera…").
+        screen.snapSpinner = MakeSpinner(confirm, 46f, 5.5f, s_T.onPrimary);
+        ((RectTransform)screen.snapSpinner.transform).anchoredPosition = new Vector2(-250f, 0f);
+        screen.snapSpinner.gameObject.SetActive(false);
 
         screen.snapChipsLabel = TextIn(TopBand("Others Label", card, 380f, 48f, 48f, 48f), "Another entrance", s_Regular,
             32, s_T.onSurfaceVariant, TextAnchor.MiddleLeft);

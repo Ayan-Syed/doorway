@@ -101,6 +101,9 @@ public partial class NavigationScreen
     public Text snapTitle;
     public Text snapHint;
     public Button snapConfirm;
+    [Tooltip("Confirm's label: \"Starting camera…\" until AR tracks, and its spinner.")]
+    public Text snapConfirmLabel;
+    public Spinner snapSpinner;
     [Tooltip("The other entrances (or doors), nearest first.")]
     public Button[] snapChips;
     public Text[] snapChipLabels;
@@ -264,6 +267,7 @@ public partial class NavigationScreen
         map.TintPuck(PuckColor(), m_Indoor.state == LocalizerState.Lost);   // again after a day/night switch
         UpdateBanner();
         UpdateSnapCheck();
+        UpdateSnapConfirm();
         if (insideButton != null)
         {
             bool shown = Positioning && !inside && m_Step == Step.Home && !m_Searching;
@@ -369,6 +373,16 @@ public partial class NavigationScreen
         if (snapPanel == null || place == null || door == null)
             return;
         Haptics.Tick(15);
+        // The snap reads the camera's pose (where the phone is and which way it faces): AR must be running and
+        // tracking by Confirm, so it starts now, as on the Align screen. And the step counter asks for its permission
+        // now, while the user is standing still, not mid-walk.
+        if (Application.isPlaying)
+        {
+            navigator.SetARActive(true);
+            StepCounter.RequestEarly();
+            if (navigator.signReader != null)
+                navigator.signReader.PrepareCamera();
+        }
         m_SnapOpen = true;
         m_SnapDoor = door;
         m_SnapEntrance = entrance;
@@ -433,6 +447,9 @@ public partial class NavigationScreen
         m_SnapOpen = false;
         if (snapPanel != null)
             snapPanel.gameObject.SetActive(false);
+        // AR back to what the step wants (indoors the Localizer keeps it on anyway).
+        if (Application.isPlaying)
+            navigator.SetARActive(StepWantsAR(m_Step));
         if (m_SnapFromPrompt)
         {
             m_PromptHandled = true;   // not offered again until the Localizer stops asking and asks again
@@ -469,9 +486,10 @@ public partial class NavigationScreen
         PlanPlace place = PlaceOf(door);
         if (door == null)
             return;
+        if (FixAR() || !Tracking)
+            return;   // AR can't run yet (Confirm says why), or isn't tracking: the pose would be stale
         bool picking = m_PickingDoor;
-        if (localizer != null)
-            SnapTo(door);
+        SnapTo(door);
         CloseSnapCard(false);
         Haptics.Tick(40);
         if (picking || m_Step != Step.Home)
@@ -479,6 +497,24 @@ public partial class NavigationScreen
         Snack(place == null ? "Got you" : place.kind == "exit" ? $"You're at the {PlaceStyle.Title(place)}"
             : $"You're at {PlaceStyle.DoorTitle(place, door)} · {ConfirmHint}");
         UpdateGpsPuck();
+    }
+
+    // AR tracking: the camera's pose is good to snap with. (The previews have no AR: as if it were.)
+    bool Tracking => TestTracking ?? (!Application.isPlaying || navigator.IsTracking);
+
+    // Confirm works once AR tracks; until then it says the camera is starting, or why AR can't run (and a tap does
+    // what can be done about that, as the Align screen's Start does).
+    void UpdateSnapConfirm()
+    {
+        if (!m_SnapOpen || snapConfirm == null)
+            return;
+        ARBlock block = BlockedAR();
+        bool ready = block == ARBlock.None && Tracking;
+        SetInteractable(snapConfirm, ready || block == ARBlock.NoCamera || block == ARBlock.NotInstalled);
+        if (snapConfirmLabel != null)
+            snapConfirmLabel.text = ready ? "Confirm" : block != ARBlock.None ? BlockedLabel(block) : "Starting camera…";
+        if (snapSpinner != null && snapSpinner.gameObject.activeSelf != (!ready && block == ARBlock.None))
+            snapSpinner.gameObject.SetActive(!ready && block == ARBlock.None);
     }
 
     // Every snap goes here, so the Localizer's check of it (Confirmed, or Corrected to another door once it reads

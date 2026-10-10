@@ -39,6 +39,12 @@ public partial class NavigationScreen
         }
         Haptics.Tick(15);
         m_From = door;
+        if (Application.isPlaying)
+        {
+            StepCounter.RequestEarly();   // its permission dialog now, standing at the door, never mid-walk
+            if (navigator.signReader != null)
+                navigator.signReader.PrepareCamera();   // the sharper camera image now, not right after the snap
+        }
 
         if (originField.isFocused)
             originField.DeactivateInputField();
