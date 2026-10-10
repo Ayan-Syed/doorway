@@ -47,6 +47,28 @@ public class LocalizerStressTests
         }
     }
 
+    // Easy walks where one misread or false plate (or two at once that couldn't both be right) used to start the cloud
+    // again on the wrong plate's rings, tens of metres off; without plates they never strayed 3 m.
+    [TestCase(393)]
+    [TestCase(591)]
+    [TestCase(330)]
+    [TestCase(444)]
+    public void AWrongPlateInEasyConditionsMovesNothingFar(int seed)
+    {
+        ReplayEvaluator.StressWalkResult r = Replay(Data(), seed);
+        Assert.Less(r.max, 3f, $"seed {seed}: {r.max:F1} m off at worst | {r.info}");
+    }
+
+    // ARCore's scan misfit sent a right cloud Lost, and the next plate (a poster) started it again 16 m off: a minute
+    // to recover. A contradicting plate while Lost now takes half the cloud, not all of it.
+    [Test]
+    public void APosterWhileLostDoesNotThrowARightCloudAway()
+    {
+        ReplayEvaluator.StressWalkResult r = Replay(Data(), 379);
+        Assert.Less(r.max, 5f, $"{r.max:F1} m off at worst | {r.info}");
+        Assert.IsTrue(r.recoveries.All(x => x < 5f), $"recoveries {string.Join(", ", r.recoveries)} s");
+    }
+
     [Test]
     public void TypicalStressWalksMeetTheTargets()
     {
@@ -58,5 +80,7 @@ public class LocalizerStressTests
         Assert.Less(s.lostShare, 0.05f, table);
         Assert.Less(s.wrongShare, 0.01f, table);
         Assert.AreEqual(0, s.violations, table);
+        Assert.Less(s.localizedP95, 2f, table);                      // displayed error
+        Assert.That(s.calibration, Is.InRange(0.6f, 0.85f), table);  // Spread holds the error about 68% of the time
     }
 }

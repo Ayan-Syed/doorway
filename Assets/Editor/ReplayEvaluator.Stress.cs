@@ -13,7 +13,8 @@ using UnityEngine;
 // - the error while not Lost (median, p75, p95, max): what the user is shown as a position;
 // - the share of time Lost (the app says so and asks for a room number);
 // - the share of time confident and wrong: Localized with the error over 3 m, the most dangerous outcome;
-// - the share of time Localized, and the error then (p95, max): what the arrow is drawn from with confidence;
+// - the share of time Localized ("sure"), and the displayed error: the error while Localized, when the UI shows the
+//   position with confidence (p95, max);
 // - Spread's calibration: the share of time the error is within Spread, which should be about 68%;
 // - wall violations, and how long after a plate read while Lost the error falls under 1.5 m.
 public static partial class ReplayEvaluator
@@ -141,11 +142,11 @@ public static partial class ReplayEvaluator
     public static string StressTable(IEnumerable<StressSummary> summaries)
     {
         var text = new StringBuilder();
-        text.AppendLine("tier     config         walks median  p75    p95    max    %lost  %wrong  calib  viol  %loc  locP95 locMax recov(med/max/slow)");
+        text.AppendLine("tier     config         walks median  p75    p95    max    %lost  %wrong  calib  viol  %sure dispP95 dispMax recov(med/max/slow)");
         foreach (StressSummary s in summaries)
         {
             text.AppendLine(string.Format(CultureInfo.InvariantCulture,
-                "{0,-8} {1,-14} {2,5} {3,6:F2} {4,6:F2} {5,6:F2} {6,6:F2} {7,6:F1} {8,6:F2} {9,6:F2} {10,5} {11,5:F1} {12,6:F2} {13,6:F2} {14,5:F1}/{15:F1}/{16}",
+                "{0,-8} {1,-14} {2,5} {3,6:F2} {4,6:F2} {5,6:F2} {6,6:F2} {7,6:F1} {8,6:F2} {9,6:F2} {10,5} {11,5:F1} {12,7:F2} {13,7:F2} {14,5:F1}/{15:F1}/{16}",
                 s.tier, s.config, s.walks, s.median, s.p75, s.p95, s.max, 100f * s.lostShare, 100f * s.wrongShare,
                 s.calibration, s.violations, 100f * s.localizedShare, s.localizedP95, s.localizedMax, s.recoveryMedian,
                 s.recoveryMax, s.slowRecoveries));

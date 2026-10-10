@@ -68,6 +68,13 @@ public sealed class LocalizerEngine
     public const float LocalizedHeadingSpread = 8f, LooseHeadingSpread = 15f;
     public const float LostSpread = 6f;
     public const int LostRecoveries = 2;
+    // Plates: the likelihood left to a particle that couldn't have seen one (it may be a misread or a poster), and how
+    // long a contradicting plate waits for a second one.
+    const float LostSplit = 0.5f;
+
+    const float PlateOutlier = 0.01f, ContradictionSeconds = 10f, AgreeSlack = 1.5f;
+    const float SpreadScale = 0.6f, SpreadAfterLoss = 1.2f, LossMemory = 60f;
+    double m_LastLoss = double.NegativeInfinity;
     const float SettleSeconds = 1f, FoundSeconds = 5f, WideSeconds = 5f;
     // Steps alone (ARCore not tracking) for this long: not sure any more, until ARCore and the scans are back. A turn
     // the steps don't see (no compass yet, or a compass the building's steel turns) puts them metres out in seconds.
@@ -120,7 +127,51 @@ public sealed class LocalizerEngine
     Vector2 m_LastEstimate;
     bool m_HadEstimate;
     bool m_NeedsSign;
-    string m_PlacedBy;   // the plate that last placed the cloud: it can't confirm itself   // been Lost since the last sign: Localized again only after one
+    string m_PlacedBy;
+    string m_Contradicted;   // the last plate nothing in the cloud could have seen, and when
+    double m_ContradictedAt = double.NegativeInfinity;
+    List<Vector2> m_ContradictedSigns;
+    float m_ContradictedRange;
+    Vector2 m_ContradictedCamera;
+
+    // A plate weighed robustly (PlateOutlier: it may be a misread or a poster). One that nothing in the cloud could
+    // have seen is put down to a misread (false; remembered); a second, another plate, that also says otherwise within
+    // ContradictionSeconds and could have been seen along with the first starts the cloud again on its rings.
+    bool WeighPlate(double t, string text, List<Vector2> at, float worldRange, Vector2 camera, float bearing, float range,
+        float sigma, List<Vector2> normals)
+    {
+        string key = text.Trim();
+        m_Filter.SeedOnContradiction = m_Contradicted != null && m_Contradicted != key &&
+                                       t - m_ContradictedAt < ContradictionSeconds && Agree(at, worldRange, camera);
+        m_Filter.PlateOutlier = PlateOutlier;
+        bool fits = m_Filter.AddSignObservation(bearing, range, sigma, at, normals);
+        m_Filter.SeedOnContradiction = null;
+        m_Filter.PlateOutlier = 0f;
+        if (fits)
+        {
+            m_Contradicted = null;
+            return true;
+        }
+        m_Contradicted = key;
+        m_ContradictedAt = t;
+        m_ContradictedSigns = at;
+        m_ContradictedRange = worldRange;
+        m_ContradictedCamera = camera;
+        return false;
+    }
+
+    // Whether a plate seen at range from camera (world) and the last contradicting one could both have been seen,
+    // walking between: some pair of their plates no further apart than the two ranges and the walk, give or take.
+    // Two plates that can't both be right (a misread and a poster in one frame, say) don't add up to a fix.
+    bool Agree(List<Vector2> signs, float range, Vector2 camera)
+    {
+        float reach = range + m_ContradictedRange + Vector2.Distance(camera, m_ContradictedCamera) + AgreeSlack;
+        foreach (Vector2 a in signs)
+            foreach (Vector2 b in m_ContradictedSigns)
+                if ((a - b).sqrMagnitude <= reach * reach)
+                    return true;
+        return false;
+    }   // the plate that last placed the cloud: it can't confirm itself   // been Lost since the last sign: Localized again only after one
     float m_ScanYaw = float.NaN, m_WallsYaw = float.NaN;
 
     public LocalizerState State { get; private set; } = LocalizerState.Outdoors;
@@ -245,7 +296,7 @@ public sealed class LocalizerEngine
         if (tracking)
             m_UntrackedSince = -1;
         else if (m_UntrackedSince < 0)
-            m_UntrackedSince = t;
+            m_UntrackedSince = m_LastLoss = t;
         m_Tracking = tracking;
         if (tracking)
             m_CameraYaw = cameraYaw;
@@ -326,11 +377,20 @@ public sealed class LocalizerEngine
         m_RingUntil = t + RingSeconds;
         if (State == LocalizerState.Lost)
         {
-            // Lost: a tight cloud is weighed against it first (it may well be right already, just not trusted); if
-            // nothing in it could have seen the sign, the filter starts again on its rings.
-            // A wide cloud has too few particles on the sign's rings to say where on them: those are sampled afresh.
+            // Lost: a tight cloud is weighed against it first (it may well be right already, just not trusted), as
+            // when not Lost; if nothing in it could have seen the plate, LostSplit of it goes onto the plate's rings
+            // and the rest stays (the plate may be a misread), unless a second plate agrees: then all of it. A wide
+            // cloud has too few particles on the sign's rings to say where on them: those are sampled afresh.
             seeded = !tight;
-            if (!tight || !m_Filter.AddSignObservation(bearing, range, sigma, sign.at, sign.normal))
+            if (tight)
+            {
+                if (!WeighPlate(t, text, sign.at, worldRange, camera, bearing, range, sigma, sign.normal))
+                {
+                    m_Filter.SplitRing(bearing, range, sigma, sign.at, sign.normal, LostSplit);
+                    seeded = true;
+                }
+            }
+            else
             {
                 m_Filter.SeedRing(bearing, range, sigma, sign.at, sign.normal);
                 m_Filter.AddSignObservation(bearing, range, sigma, sign.at, sign.normal);
@@ -342,7 +402,7 @@ public sealed class LocalizerEngine
         }
         else
         {
-            if (!m_Filter.AddSignObservation(bearing, range, sigma, sign.at, sign.normal))
+            if (!WeighPlate(t, text, sign.at, worldRange, camera, bearing, range, sigma, sign.normal))
             {
                 // Put down to a misread, but doubted: the sign's rings get a share of the particles meanwhile.
                 Doubt(true);
@@ -452,13 +512,17 @@ public sealed class LocalizerEngine
         Position = m_Tracking ? m_Filter.Current(m_Camera) : m_Filter.Estimate;
         if (!float.IsNaN(m_CameraYaw))
             Heading = Mathf.DeltaAngle(0f, m_CameraYaw - m_Filter.Yaw);
-        Spread = m_Filter.Radius(0.68f);
+        float radius = m_Filter.Radius(0.68f);
+        // Spread is the cloud's 68% radius scaled to hold the error about 68% of the time (the stress walks: the cloud
+        // is wider than the error by a third, except after ARCore has lost tracking, when its jumps are on top).
+        Spread = radius * (m_Time - m_LastLoss < LossMemory ? SpreadAfterLoss : SpreadScale);
         Confidence = m_Filter.Confidence;
 
         bool blind = m_UntrackedSince >= 0 && m_Time - m_UntrackedSince >= BlindSeconds;
         bool sure = Spread < LocalizedSpread && Confidence > LocalizedConfidence && !jumped && m_Tracking &&
                     m_Filter.HeadingSpread < LocalizedHeadingSpread;
         bool loose = Spread > LooseSpread || Confidence < LooseConfidence || m_Filter.HeadingSpread > LooseHeadingSpread;
+        WalkItOut(sure && m_Evidence >= EvidenceNeeded && !Doubting && m_Filter.Radius(Wide) < 2f * LocalizedSpread);
         if (!sure)
             m_SureSince = -1;
         else if (m_SureSince < 0)
@@ -470,7 +534,7 @@ public sealed class LocalizerEngine
 
         if (State != LocalizerState.Lost)
         {
-            if (Spread <= LostSpread)
+            if (radius <= LostSpread)
             {
                 m_WideSince = -1;
             }
@@ -503,7 +567,53 @@ public sealed class LocalizerEngine
         {
             SetState(LocalizerState.Converging, "found");
         }
+        NotSure = State == LocalizerState.Localized ? null
+            : State == LocalizerState.Lost ? "lost"
+            : !m_Tracking ? "blind"
+            : m_NeedsSign ? "needs plate"
+            : Doubting ? "doubting a plate"
+            : Spread >= LocalizedSpread ? "position spread"
+            : m_Filter.HeadingSpread >= LocalizedHeadingSpread ? "heading spread"
+            : Confidence <= LocalizedConfidence ? "low confidence"
+            : m_Filter.Radius(Wide) >= 2f * LocalizedSpread ? "a far tail"
+            : m_Evidence < EvidenceNeeded ? "evidence"
+            : "settling";
     }
+
+    // Topology instead of a plate: a cloud that has stayed tight and alone while the user walked WalkOutDistance and
+    // turned WalkOutTurn degrees in all (corners, junctions) has matched the walk's shape to one place in the building;
+    // look-alike hallways seldom share a whole stretch of turns. Then no plate is needed to be sure again.
+    void WalkItOut(bool tight)
+    {
+        if (!m_NeedsSign || !tight || !m_Tracking)
+        {
+            m_OutWalked = m_OutTurned = 0f;
+            m_OutFrom = m_Camera;
+            m_OutDirection = float.NaN;
+            return;
+        }
+        Vector2 step = m_Camera - m_OutFrom;
+        if (step.sqrMagnitude < OutSegment * OutSegment)
+            return;
+        float direction = PositionFilter.Heading(step);
+        if (!float.IsNaN(m_OutDirection))
+            m_OutTurned += Mathf.Abs(Mathf.DeltaAngle(m_OutDirection, direction));
+        m_OutDirection = direction;
+        m_OutWalked += step.magnitude;
+        m_OutFrom = m_Camera;
+        if (m_OutWalked >= WalkOutDistance && m_OutTurned >= WalkOutTurn)
+        {
+            m_NeedsSign = false;
+            m_OutWalked = m_OutTurned = 0f;
+        }
+    }
+
+    const float WalkOutDistance = 15f, WalkOutTurn = 60f, OutSegment = 1f;
+    float m_OutWalked, m_OutTurned, m_OutDirection = float.NaN;
+    Vector2 m_OutFrom;
+
+    /// <summary>Why it isn't Localized (null when it is): for the evaluator's breakdown of the time not sure.</summary>
+    public string NotSure { get; private set; }
 
     // A sign said otherwise a moment ago (its rings still take particles): not sure until it agrees or times out.
     bool Doubting => m_Filter.MinimumInjection > 0f && m_Filter.HasRing;

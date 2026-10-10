@@ -96,7 +96,7 @@ public static partial class BuildNavigateScene
         Card(banner, s_T.surface, 28f, true).raycastTarget = true;
         screen.positionBanner = banner.gameObject.AddComponent<CanvasGroup>();
         screen.positionBannerIcon = TextIn(Fixed("Icon", banner, new Vector2(0f, 1f), new Vector2(64f, -56f),
-            new Vector2(72f, 72f)), "", s_Icons, 48, s_T.warning, TextAnchor.MiddleCenter);
+            new Vector2(72f, 72f)), "\ue412", s_Icons, 48, s_T.warning, TextAnchor.MiddleCenter);
         screen.positionBannerText = TextIn(TopBand("Text", banner, 18f, 76f, 116f, 32f),
             "Point your camera at any room number", s_SemiBold, 34, s_T.onSurface, TextAnchor.MiddleLeft);
         BestFit(screen.positionBannerText, 26);

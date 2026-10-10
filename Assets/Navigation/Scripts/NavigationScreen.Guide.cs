@@ -19,6 +19,51 @@ public partial class NavigationScreen
     bool m_StatusWired;
     int m_RealignStyle = -1;
 
+    // How sure guidance may be of the position. The Localizer converging with a wide spread can be metres (even tens
+    // of metres) off: then "Turn right · 30 ft" and a bright, running ribbon would be confidently wrong.
+    //   Sure     Localized, or converging and narrow: guidance as usual
+    //   Unsure   converging and wide: the banner says it's finding the spot, no turn or distance, no turn buzz, the
+    //            ribbon faint and still, the minimap's dot haloed
+    //   Lost     the banner asks for a room number, no ribbon
+    // Into Unsure past UnsureEnter and out under UnsureLeave, each only once it has held for GuidanceHold, so the
+    // banner never flickers between the two. Lost comes and goes at once (the Localizer's own state is steady).
+    enum Guidance { Sure, Unsure, Lost }
+    const float UnsureEnter = 2.5f;
+    const float UnsureLeave = 2f;
+    const float GuidanceHold = 1f;
+    const float UnsureRibbon = 0.3f;
+    const string IconFinding = "\ue1b7";   // location_searching
+    const string IconLookAround = "\ue412"; // photo_camera
+    Guidance m_Guidance;
+    float m_GuidancePending = -1f;   // since when the other state has been called for
+
+    Guidance JudgeGuidance(bool instant)
+    {
+        if (m_Indoor.state == LocalizerState.Lost)
+        {
+            m_GuidancePending = -1f;
+            return m_Guidance = Guidance.Lost;
+        }
+        bool wide = m_Indoor.state == LocalizerState.Converging
+                    && (m_Guidance == Guidance.Unsure ? m_Indoor.spread >= UnsureLeave : m_Indoor.spread > UnsureEnter);
+        Guidance want = wide ? Guidance.Unsure : Guidance.Sure;
+        if (want == m_Guidance)
+            m_GuidancePending = -1f;
+        else if (instant || m_Guidance == Guidance.Lost)
+        {
+            m_Guidance = want;
+            m_GuidancePending = -1f;
+        }
+        else if (m_GuidancePending < 0f)
+            m_GuidancePending = Time.unscaledTime;
+        else if (Time.unscaledTime - m_GuidancePending >= GuidanceHold)
+        {
+            m_Guidance = want;
+            m_GuidancePending = -1f;
+        }
+        return m_Guidance;
+    }
+
     // The Start button: the user stands with their back to the door, phone up. While AR can't run it does what
     // can be done about that instead (Align).
     void Begin()
@@ -49,6 +94,8 @@ public partial class NavigationScreen
         m_StatusY = float.NaN;
         m_EndStyle = -1;
         m_RealignStyle = -1;
+        m_Guidance = Guidance.Sure;
+        m_GuidancePending = -1f;
         if (!m_StatusWired && statusButton != null)
         {
             m_StatusWired = true;
@@ -65,10 +112,31 @@ public partial class NavigationScreen
         if (!navigator.IsGuiding || navigator.Route == null)
             return;
         Route route = navigator.Route;
+        if (!Application.isPlaying)
+            m_Indoor = ReadIndoor();   // previews: no Update has read it
+        Guidance was = m_Guidance;
+        Guidance guidance = JudgeGuidance(instant);
+        bool sure = guidance == Guidance.Sure;
         Maneuver step = navigator.NextStep(out float distance, out Maneuver then, out float gap);
         bool now = distance < NowDistance;
         bool arriving = step == Maneuver.Arrive;
 
+        if (navigator.ribbon != null)
+            navigator.ribbon.SetGuidance(sure ? 1f : guidance == Guidance.Unsure ? UnsureRibbon : 0f, sure,
+                instant || !Application.isPlaying);
+        if (!sure)
+        {
+            // No turn, no distance: only what to do to be found again.
+            bool lostSpot = guidance == Guidance.Lost;
+            maneuverIcon.text = lostSpot ? IconLookAround : IconFinding;
+            maneuverDistance.text = "";
+            maneuverTitle.text = lostSpot ? "Point your camera at a room number" : "Finding your exact spot…";
+            maneuverDetail.text = lostSpot ? m_TowardText : "Keep the camera up and keep walking";
+            if (thenTab.gameObject.activeSelf)
+                thenTab.gameObject.SetActive(false);
+        }
+        else
+        {
         maneuverIcon.text = ManeuverIcon(step);
         maneuverDistance.text = now ? "Now" : Feet(distance);
         if (arriving)
@@ -92,10 +160,11 @@ public partial class NavigationScreen
             thenTab.gameObject.SetActive(showThen);
         if (showThen)
             thenIcon.text = ManeuverIcon(then);
+        }
 
-        // A buzz as each turn comes up, once.
+        // A buzz as each turn comes up, once, and only when sure of it.
         float at = navigator.Progress + distance;
-        if (now && !arriving && (route != m_AnnouncedRoute || Mathf.Abs(at - m_AnnouncedAt) > 2f))
+        if (sure && now && !arriving && (route != m_AnnouncedRoute || Mathf.Abs(at - m_AnnouncedAt) > 2f))
         {
             m_AnnouncedRoute = route;
             m_AnnouncedAt = at;
@@ -122,12 +191,23 @@ public partial class NavigationScreen
             SetStatus(null, default);
         StyleRealign(realign, instant);
 
-        // What's left, and the clock time you'll be there (checked each second, or as the distance changes).
+        // What's left, and the clock time you'll be there (checked each second, or as the distance changes). Not
+        // while unsure: the distance is as unsure as the position.
         float remaining = navigator.Remaining;
         int feet = FeetRounded(remaining);
         float time = Time.unscaledTime;
+        if (!sure)
+        {
+            if (was != guidance || instant)
+            {
+                etaText.text = "–";
+                etaDetail.text = guidance == Guidance.Lost ? "Lost your spot · look for a room number"
+                    : "Distance once you're found";
+            }
+            m_EtaFeet = -1;   // written again as soon as it's sure
+        }
         bool moved = feet != m_EtaFeet;
-        if (instant || moved || time >= m_NextClock)
+        if (sure && (instant || moved || time >= m_NextClock))
         {
             m_NextClock = time + 1f;
             DateTime arrive = DateTime.Now.AddSeconds(remaining / Navigator.WalkingSpeed);
@@ -149,7 +229,11 @@ public partial class NavigationScreen
         }
 
         // Heading-up round the user; the walked part of the route is cut off.
-        miniMap.Follow(route, navigator.Progress, navigator.UserPosition, navigator.UserHeading, instant);
+        // Haloed as wide as the estimate is unsure, and coloured like the big map's dot.
+        miniMap.Follow(route, navigator.Progress, navigator.UserPosition, navigator.UserHeading, instant,
+            sure ? 0f : Mathf.Max(m_Indoor.spread, MinAccuracyShown));
+        miniMap.TintPuck(sure ? Theme.Current.primary : guidance == Guidance.Lost ? Theme.Current.onSurfaceVariant
+            : Theme.Current.warning, guidance == Guidance.Lost);
         StyleEnd(false);
     }
 

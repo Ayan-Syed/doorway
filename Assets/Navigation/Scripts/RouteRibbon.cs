@@ -32,6 +32,67 @@ public class RouteRibbon : MonoBehaviour
     readonly List<Vector2> m_Uvs = new List<Vector2>();
     readonly List<Color32> m_Colors = new List<Color32>();
     readonly List<int> m_Triangles = new List<int>();
+    readonly List<Color32> m_Faded = new List<Color32>();
+
+    // How sure guidance is (NavigationScreen.SetGuidance): the whole band fades toward a target and the chevrons
+    // stop running while it's unsure, so an unsure route never looks like a confident one.
+    const float FadeSpeed = 2.5f;          // alpha a second: about 0.3 s from full to faint
+    const float StillBelow = 0.6f;         // the chevrons stop (or run again) once faded past this
+    static readonly int ScrollSpeedId = Shader.PropertyToID("_ScrollSpeed");
+    float m_Alpha = 1f, m_TargetAlpha = 1f;
+    bool m_Scrolling = true;
+    float m_ScrollSpeed = float.NaN;
+    MaterialPropertyBlock m_Block;
+
+    // alpha: 1 normal, about 0.3 unsure, 0 hidden (lost). scroll: the chevrons run. instant: no fade (the editor's
+    // previews, which have no Update).
+    public void SetGuidance(float alpha, bool scroll, bool instant = false)
+    {
+        m_TargetAlpha = Mathf.Clamp01(alpha);
+        m_Scrolling = scroll;
+        if (!instant || m_Alpha == m_TargetAlpha)
+            return;
+        m_Alpha = m_TargetAlpha;
+        ApplyAlpha();
+        SetScrolling(scroll);
+    }
+
+    void Update()
+    {
+        if (m_Alpha != m_TargetAlpha)
+        {
+            m_Alpha = Mathf.MoveTowards(m_Alpha, m_TargetAlpha, Time.unscaledDeltaTime * FadeSpeed);
+            ApplyAlpha();
+        }
+        // The chevrons stop or start only while faint, where the jump to the shader's resting phase doesn't show.
+        SetScrolling(m_Scrolling || m_Alpha > StillBelow);
+    }
+
+    void SetScrolling(bool run)
+    {
+        var renderer = GetComponent<MeshRenderer>();
+        if (renderer == null || renderer.sharedMaterial == null)
+            return;
+        float speed = run ? renderer.sharedMaterial.GetFloat(ScrollSpeedId) : 0f;
+        if (speed == m_ScrollSpeed)
+            return;
+        m_ScrollSpeed = speed;
+        m_Block ??= new MaterialPropertyBlock();
+        renderer.GetPropertyBlock(m_Block);
+        m_Block.SetFloat(ScrollSpeedId, speed);
+        renderer.SetPropertyBlock(m_Block);
+    }
+
+    // The fades' vertex alphas times the band's alpha, without building the mesh again.
+    void ApplyAlpha()
+    {
+        if (m_Mesh == null || m_Colors.Count == 0 || m_Mesh.vertexCount != m_Colors.Count)
+            return;
+        m_Faded.Clear();
+        foreach (Color32 c in m_Colors)
+            m_Faded.Add(new Color32(c.r, c.g, c.b, (byte)(c.a * m_Alpha)));
+        m_Mesh.SetColors(m_Faded);
+    }
 
     void EnsureMesh()
     {
@@ -183,6 +244,8 @@ public class RouteRibbon : MonoBehaviour
         m_Mesh.SetVertices(m_Vertices);
         m_Mesh.SetUVs(0, m_Uvs);
         m_Mesh.SetColors(m_Colors);
+        if (m_Alpha < 1f)
+            ApplyAlpha();
         m_Mesh.SetTriangles(m_Triangles, 0);
         m_Mesh.RecalculateBounds();
     }

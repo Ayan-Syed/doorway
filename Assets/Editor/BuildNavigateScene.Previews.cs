@@ -282,6 +282,9 @@ public static partial class BuildNavigateScene
             Capture("6b-line-up-waiting", () => s.PreviewAlign(m_To, m_From, m_Door, false));
             Capture("7-guide", () => GuideAt(3f));
             Capture("8-guide-turn-now", () => GuideAt(FirstTurn() - 0.8f));
+            // The same turn coming up while the Localizer is unsure, then lost: no turn, a faint (then no) ribbon.
+            Capture("8b-guide-unsure", () => GuideIndoorAt(FirstTurn() - 0.8f, LocalizerState.Converging, 6f));
+            Capture("8c-guide-lost", () => GuideIndoorAt(FirstTurn() - 0.8f, LocalizerState.Lost, 10f));
             Capture("9-arriving", () => GuideAt(m_Route.length - 5f));
             Capture("10-arrived", () =>
             {
@@ -309,6 +312,13 @@ public static partial class BuildNavigateScene
             m_Navigator.Preview(m_Door, m_To, Mathf.Clamp(progress, 0f, m_Route.length), 0f, false);
             Look(m_Navigator.UserPosition, m_Navigator.UserHeading);
             m_Screen.PreviewGuide(m_To, null);
+        }
+
+        void GuideIndoorAt(float progress, LocalizerState state, float spread)
+        {
+            m_Navigator.Preview(m_Door, m_To, Mathf.Clamp(progress, 0f, m_Route.length), 0f, false);
+            Look(m_Navigator.UserPosition, m_Navigator.UserHeading);
+            m_Screen.PreviewGuideIndoor(m_To, state, spread);
         }
 
         // Where the route first turns, past its first few metres (its middle if it never does).

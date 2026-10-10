@@ -144,6 +144,13 @@ public sealed class PositionFilter
     public float HeadingSpread { get; private set; }
     public int Recoveries { get; private set; }
 
+    /// <summary>A sign no particle can explain: whether it starts the cloud again on its rings (null: when the cloud
+    /// isn't sure of itself, or on the second such sign in a row).</summary>
+    public bool? SeedOnContradiction { get; set; }
+    /// <summary>The likelihood a sign leaves a particle that couldn't have seen it (0: none), against 1 for one that
+    /// sees it just so.</summary>
+    public float PlateOutlier { get; set; }
+
     /// <summary>Whether the last sign observation started the cloud again on the sign's rings.</summary>
     public bool SignSeeded { get; private set; }
     public int RecoveriesInARow { get; private set; }
@@ -711,7 +718,8 @@ public sealed class PositionFilter
         if (total <= 1e-12f)
         {
             // Nothing here could have seen it: a misread while the filter is sure, else the filter is wrong.
-            bool trusted = Confidence >= TrustAbove && m_Contradictions == 0;
+            bool trusted = SeedOnContradiction.HasValue ? !SeedOnContradiction.Value
+                : Confidence >= TrustAbove && m_Contradictions == 0;
             m_Contradictions++;
             if (trusted)
                 return false;
@@ -723,8 +731,23 @@ public sealed class PositionFilter
                 return false;
         }
         m_Contradictions = 0;
-        for (int i = 0; i < m_Count; i++)
-            m_Weight[i] *= m_Likelihood[i] / total;
+        if (PlateOutlier > 0f)
+        {
+            // Robust: the plate may be a misread or a poster (Probabilistic Robotics §6.3's z_rand, for plates), so a
+            // part of the cloud that couldn't have seen it is weighed down, not out.
+            float sum = 0f;
+            for (int i = 0; i < m_Count; i++)
+            {
+                m_Weight[i] *= PlateOutlier + m_Likelihood[i];
+                sum += m_Weight[i];
+            }
+            Normalize(sum);
+        }
+        else
+        {
+            for (int i = 0; i < m_Count; i++)
+                m_Weight[i] *= m_Likelihood[i] / total;
+        }
         ResampleIfNeeded();
         UpdateEstimate();
         return true;
@@ -812,6 +835,25 @@ public sealed class PositionFilter
         Uniform();
         ForgetRecoveries();
         ResetAverages();
+        UpdateEstimate();
+    }
+
+    /// <summary>share of the cloud goes onto the sign's rings, the rest stays where it was, all weighed alike: for a
+    /// sign that contradicts a cloud nobody trusts (Lost) but that may itself be a misread. The scans that follow say
+    /// which part was right.</summary>
+    public void SplitRing(float worldBearing, float range, float rangeSigma, IReadOnlyList<Vector2> landmarks,
+        IReadOnlyList<Vector2> normals, float share)
+    {
+        if (landmarks == null || landmarks.Count == 0)
+            return;
+        FreeHeading();
+        Resample();   // equal weights first, so a share of the particles is a share of the weight
+        PrepareStandOffs(landmarks, normals);
+        rangeSigma = Mathf.Max(rangeSigma, MinRangeSigma);
+        for (int i = 0; i < m_Count; i++)
+            if (m_Random.NextDouble() < share)
+                RingParticle(i, i % landmarks.Count, worldBearing, range, rangeSigma, landmarks, normals);
+        Uniform();
         UpdateEstimate();
     }
 

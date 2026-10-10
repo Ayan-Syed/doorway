@@ -43,8 +43,8 @@ public partial class NavigationScreen
 
     const string NeedsViewMessage = "Hold your phone up to update your location";
     const string AskForSignMessage = "Point your camera at any room number";
-    const string IconCamera = "";      // photo_camera
-    const string IconSign = "";        // visibility
+    const string IconCamera = "\ue412";      // photo_camera
+    const string IconSign = "\ue8f4";        // visibility
     const float BannerHeight = 112f;
     const float BannerWithButton = 196f;
     // The dot is re-laid out only when it has moved or turned this much, or its halo changed this much.

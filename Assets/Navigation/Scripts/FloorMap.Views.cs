@@ -98,7 +98,8 @@ public partial class FloorMap
     }
 
     // Heading-up around the user; the walked part of the route is cut off. Call it every frame.
-    public void Follow(Route route, float progress, Vector2 position, float heading, bool instant)
+    // accuracy: the halo round the user, in metres (0 for none).
+    public void Follow(Route route, float progress, Vector2 position, float heading, bool instant, float accuracy = 0f)
     {
         if (!m_Following)
         {
@@ -108,7 +109,7 @@ public partial class FloorMap
         // Re-cut only after 0.3 m, so the dots aren't re-meshed every frame.
         if (route != m_Route || Mathf.Abs(progress - m_RouteFrom) > 0.3f)
             DrawRoute(route, progress);
-        SetPuck(position, heading, 0f, true);
+        SetPuck(position, heading, accuracy, true);
 
         float dt = Time.unscaledDeltaTime;
         m_Rotation = Mathf.LerpAngle(m_Rotation, heading, instant ? 1f : 1f - Mathf.Exp(-dt * 8f));

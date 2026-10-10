@@ -214,6 +214,26 @@ public partial class NavigationScreen
         UpdateBanner();
     }
 
+    // Walking with the Localizer unsure (converging, this wide) or lost: after navigator.Preview, like PreviewGuide.
+    public void PreviewGuideIndoor(PlanPlace destination, LocalizerState state, float spread)
+    {
+        PreviewBegin();
+        m_PreviewingIndoor = true;
+        m_PreviewIndoor = new Indoor
+        {
+            state = state,
+            position = navigator.UserPosition,
+            heading = navigator.UserHeading,
+            spread = spread,
+            askForSign = state == LocalizerState.Lost,
+        };
+        m_Indoor = m_PreviewIndoor;
+        m_Destination = m_Selected = destination;
+        m_AnnouncedRoute = null;
+        m_EndConfirmUntil = 0f;
+        ShowGuide();
+    }
+
     // The snap card the Localizer offers coming in through an entrance (the phone still outdoors).
     public void PreviewEntrance(PlanPlace entrance)
     {

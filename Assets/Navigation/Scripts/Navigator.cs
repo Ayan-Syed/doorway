@@ -591,7 +591,8 @@ public partial class Navigator : MonoBehaviour
             return;
         CheckOffRoute();
         // Arrival must hold for a moment of tracked time: a pose that jumps on a lost or jittery frame isn't a walk.
-        m_ArriveTime = tracking && ArrivedNow() ? m_ArriveTime + Time.deltaTime : 0f;
+        // Nor does it count while the localizer is unsure where the user is (the banner and ribbon wait for it too).
+        m_ArriveTime = tracking && SureOfPosition() && ArrivedNow() ? m_ArriveTime + Time.deltaTime : 0f;
         if (m_ArriveTime >= ArriveSeconds)
         {
             HasArrived = true;
@@ -678,6 +679,17 @@ public partial class Navigator : MonoBehaviour
 
     // Close to the end of the route while on it, or close to the door itself on the route's last stretch. Only the
     // last stretch: a route can pass the destination's door earlier on (round a loop), and that isn't arriving.
+    // Sure enough of the position for arrival to count: no localizer indoors (ARCore alone, or outdoors), Localized,
+    // or Converging with the cloud within ArriveSpread.
+    bool SureOfPosition() => localizer == null || !localizer.Indoors ||
+                             SureOfPosition(localizer.State, localizer.Spread);
+
+    public const float ArriveSpread = 2f;
+
+    /// <summary>Whether arrival may count in this localizer state with this spread (metres).</summary>
+    public static bool SureOfPosition(LocalizerState state, float spread) =>
+        state == LocalizerState.Localized || state == LocalizerState.Converging && spread <= ArriveSpread;
+
     bool ArrivedNow()
     {
         if (Remaining < ArriveDistance && OffRoute < ArriveOffRouteLimit)
