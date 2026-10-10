@@ -47,6 +47,7 @@ public partial class NavigationScreen
         map.Overview(route, Plan.NodePosition(door.node), Navigator.Heading(-door.Direction), !Application.isPlaying);
         m_StartedTime = Time.unscaledTime;
         UpdateAlign();
+        OnVoiceAlign(place, door, auto);
         return true;
     }
 

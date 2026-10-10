@@ -13,8 +13,8 @@ using UnityEngine.UI;
 //   Align    the route on the map, turned the way the user will face, other doors nearby, and Start once AR tracks
 //   Guide    the next turn, a minimap and what's left; the route and the destination are drawn in AR
 //   Arrived  "You've arrived"
-// Over them: Settings (your marker on the map, light or dark, the 3D map, a pretend location for demos) and the
-// floor menu. The navigation itself is Navigator's and the map is FloorMap's; the scene builder lays everything
+// Over them: Settings (your marker on the map, light or dark, the 3D map, a pretend location for demos, spoken
+// directions), the floor menu, and the mic button: everything above can be done by talking (NavigationScreen.Voice). The navigation itself is Navigator's and the map is FloorMap's; the scene builder lays everything
 // out and wires these fields. The rest of the class is in the NavigationScreen.*.cs files, one per screen.
 public partial class NavigationScreen : MonoBehaviour
 {
@@ -160,6 +160,21 @@ public partial class NavigationScreen : MonoBehaviour
     public Text pretendDetail;
     public Image pretendTrack;
     public Image pretendKnob;
+
+    [Tooltip("Spoken directions: read turns aloud and answer when spoken to.")]
+    public Button voiceToggle;
+    public Image voiceTrack;
+    public Image voiceKnob;
+
+    [Header("Voice")]
+    public VoiceInput voiceInput;
+    public VoiceOutput voiceOutput;
+    [Tooltip("Talk to the app: lower left, over the map or the camera.")]
+    public CanvasGroup micButton;
+    public Image micBackground;
+    public Text micIcon;
+    [Tooltip("Swells with the voice while listening.")]
+    public RectTransform micRing;
 
     [Header("Snackbar")]
     public CanvasGroup snackbar;

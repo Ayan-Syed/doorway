@@ -1,0 +1,26 @@
+{
+  "_comment": "What people call places, beyond what make_dataset.py derives from the plan (room numbers, kinds). Keyed by place id in ba1-floor1.json. 'names' are whole references; restrooms take 'where' qualifiers after the men's/women's noun.",
+  "places": {
+    "117": {"names": ["the old java city", "java city", "the old cafe", "the coffee place", "the cafe"]},
+    "148": {"names": ["the exchange", "the events space", "148 the exchange"]},
+    "130": {"names": ["the lounge", "the lounge by the north lobby", "the north lobby lounge"]},
+    "145": {"names": ["the office suite", "the offices"]},
+    "wc-m-a": {"where": ["in the atrium wing", "by 123", "near room 123", "in the atrium"]},
+    "wc-w-a": {"where": ["in the atrium wing", "by 125", "near room 125", "in the atrium"]},
+    "wc-m-w": {"where": ["in the lobby", "by the elevators", "in the main lobby", "next to the elevators"]},
+    "wc-w-w": {"where": ["in the lobby", "by the elevators", "in the main lobby", "next to the elevators"]},
+    "elev-a": {"names": ["the atrium elevator", "the elevator in the atrium", "the elevator in front of 107", "the elevator by 107"]},
+    "elev-w": {"names": ["the lobby elevators", "the elevators in the lobby", "the elevators in lobby 138", "the main elevators"]},
+    "stair-127": {"names": ["the main stairs", "the atrium stairs", "the big staircase in the atrium", "stairs 127"]},
+    "stair-129": {"names": ["stairs 129", "the lobby stairs", "the stairs in the lobby", "stairwell 129"]},
+    "stair-120": {"names": ["stairs 120", "the stairs by 121", "the north-west stairs", "stairwell 120"]},
+    "stair-118": {"names": ["stairs 118", "the stairs by 117", "the north-east stairs", "the stairs by the old java city"]},
+    "exit-n": {"names": ["the north entrance", "the north doors", "the entrance through 189"]},
+    "exit-nw": {"names": ["the north-west entrance", "the north-west doors", "the north-west entrance by 119"]},
+    "exit-ne": {"names": ["the north-east entrance", "the north-east doors", "the north-east entrance by 119"]},
+    "exit-sw": {"names": ["the south-west entrance", "the south-west doors", "the south-west entrance by 126"]},
+    "exit-se": {"names": ["the south-east entrance", "the south-east doors", "the south-east entrance by 110"]},
+    "exit-e": {"names": ["the east exit", "the exit toward engineering", "the east doors", "the doors to engineering"]},
+    "exit-ba2": {"names": ["the exit to BA2", "the doors to BA two", "the way to business administration two", "the BA2 connector"]}
+  }
+}

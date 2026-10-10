@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The app's own sources, compiled outside Unity against UnityStubs.cs. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../Assets/Navigation/Scripts/VoiceParser.cs" />
+    <Compile Include="../../../Assets/Navigation/Scripts/VoiceIntent.cs" />
+    <Compile Include="../../../Assets/Navigation/Scripts/FloorPlan.cs" />
+  </ItemGroup>
+</Project>

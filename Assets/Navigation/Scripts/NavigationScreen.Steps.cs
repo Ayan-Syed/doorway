@@ -144,6 +144,7 @@ public partial class NavigationScreen
                 settingsPanel.gameObject.SetActive(false);
         }
 
+        UpdateVoice();
         if (snackbar.alpha > 0f)
         {
             PlaceSnackbar();   // it follows a sheet that's moving
@@ -214,26 +215,30 @@ public partial class NavigationScreen
         PlaceSnackbar();
     }
 
-    // Just above whatever is along the bottom, but never above 60 % of the screen.
+    // Just above whatever is along the bottom (and the mic button), but never above 60 % of the screen.
     void PlaceSnackbar()
     {
-        float bottom;
-        if (settingsPanel.gameObject.activeSelf)
-            bottom = settingsSheet.Height;
-        else
-            switch (m_Step)
-            {
-                case Step.Home: bottom = homeSheet.Height; break;
-                case Step.Place: bottom = placeSheet.Height; break;
-                case Step.Start: bottom = startSheet.Height; break;
-                case Step.Align: bottom = alignSheet.Height; break;
-                case Step.Guide: bottom = TopOf(miniMapFrame); break;
-                default: bottom = TopOf(arrivedCard); break;
-            }
+        float bottom = settingsPanel.gameObject.activeSelf ? settingsSheet.Height : BottomUI();
         var rect = (RectTransform)snackbar.transform;
         float y = Mathf.Min(bottom, safeArea.rect.height * 0.6f) + 24f;
+        if (m_MicTop >= 0f && !settingsPanel.gameObject.activeSelf)
+            y = Mathf.Max(y, m_MicTop + 16f);
         if (rect.anchoredPosition.y != y)
             rect.anchoredPosition = new Vector2(rect.anchoredPosition.x, y);
+    }
+
+    // How far up the step's sheet or card reaches: the snackbar and the mic button go just above it.
+    float BottomUI()
+    {
+        switch (m_Step)
+        {
+            case Step.Home: return homeSheet.Height;
+            case Step.Place: return placeSheet.Height;
+            case Step.Start: return startSheet.Height;
+            case Step.Align: return alignSheet.Height;
+            case Step.Guide: return TopOf(miniMapFrame);
+            default: return TopOf(arrivedCard);
+        }
     }
 
     // The sheets' stops for this safe area: peek, the middle, and the top just under the search or route card.

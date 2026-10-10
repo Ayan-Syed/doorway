@@ -42,6 +42,8 @@ public static partial class BuildNavigateScene
         screen.nightThemeName = NightTheme;
         screen.uiCamera = uiCamera;
         screen.location = screen.gameObject.AddComponent<UserLocation>();
+        screen.voiceInput = screen.gameObject.AddComponent<VoiceInput>();
+        screen.voiceOutput = screen.gameObject.AddComponent<VoiceOutput>();
         screen.markerSprites = s_Emoji;
         screen.themeColors = screen.gameObject.AddComponent<ThemeColors>();
 
@@ -89,6 +91,7 @@ public static partial class BuildNavigateScene
         CreateArrived(screen, safeArea);
         CreateDirections(screen, safeArea);
         CreateHome(screen, safeArea);
+        CreateMic(screen, safeArea);
         CreateSettings(screen, safeArea);
         CreateSnackbar(screen, safeArea);
         CreateLaunch(screen, rootRect);

@@ -59,6 +59,7 @@ public static partial class BuildNavigateScene
     const string IconDone = "";
     const string IconMyLocation = "";
     const string IconWholeFloor = "";
+    const string IconMic = "";
 
     // The markers Settings offers after the blue dot: Noto Color Emoji pictures (UI/Emoji/LICENSE.txt).
     static readonly string[] MarkerEmoji =

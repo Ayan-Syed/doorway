@@ -12,6 +12,7 @@ public partial class NavigationScreen
     {
         m_SavedQuery = "";
         m_Searching = false;
+        ResetVoice();
         searchField.SetTextWithoutNotify("");
         homeList.ResetSearch();
         ShowPlanBuilding();

@@ -13,7 +13,7 @@ public partial class NavigationScreen
     const float StartPeek = 196f;
     const float PlaceHeight = 560f;
     const float AlignHeight = 540f;
-    const float SettingsHeight = 1360f;
+    const float SettingsHeight = 1480f;
     const float KnobTravel = 22f;
 
     // How far the maps lean back with the 3D map on, in degrees.
@@ -64,6 +64,16 @@ public partial class NavigationScreen
     const string AppearanceKey = "appearance";
     const string Map3DKey = "map3d";
     const string PretendKey = "pretend";
+    const string VoiceKey = "voice";
+
+    // Voice. Turns are announced this far ahead (about 30 ft), and again at the turn.
+    const float PrepareDistance = 9f;
+    // A turn this far past the last one gets "continue straight for…" as the last one is passed.
+    const float LongStraight = 20f;
+    // The mic button: its size, and how far above the sheet or card under it (more on Home, over the map credit).
+    const float MicSize = 112f;
+    const float MicLift = 24f;
+    const float MicLiftHome = 84f;
     const int AppearanceAuto = 0;
     const int AppearanceDark = 2;
 
@@ -137,6 +147,31 @@ public partial class NavigationScreen
     Vector2? m_NearbyAt;
     string m_FromTitle;            // the start door's name, for the origin row
     bool m_FromAuto;               // the start was picked from the phone's location: the origin row says how near
+
+    // The conversation (NavigationScreen.Voice).
+    IVoiceInterpreter m_Interpreter;
+    bool m_Voice = true;           // spoken directions and answers (Settings)
+    bool m_Conversing;             // the user has used the mic: questions listen for the answer by themselves
+    VoiceQuestion m_Question;      // what was last asked, so a bare answer means the right thing
+    readonly List<(PlanPlace place, PlanDoor door)> m_Choices = new List<(PlanPlace place, PlanDoor door)>();
+    bool m_ChoicesAreDestinations;
+    string m_GoalKind;             // "the nearest restroom", waiting to know where the user is
+    PlanPlace m_HerePlace;         // where the user said they are
+    PlanDoor m_HereDoor;
+    bool m_BeginWhenTracking;      // said "start" before AR was tracking
+    bool m_ListenAfterSpeech;
+    int m_Retries;
+    string m_LastSaid;             // for "repeat that"
+    int m_MicStyle = -1;
+    float m_MicTop = -1f;          // the mic button's top above the safe area's bottom, or -1 while it's hidden
+    // What guidance last said: on which route, at which turn, and how much of it.
+    Route m_SpokenRoute;
+    float m_SpokenAt = float.NaN;
+    bool m_SaidPrepare;
+    bool m_SaidNow;
+    bool m_SaidOffRoute;
+    bool m_SaidTrackingLost;
+    string m_GuideLead;            // said before the first step: "Head toward Room 107." or "New route."
 
     // What guidance last showed, so a frame that changes nothing builds no strings and dirties no layout.
     string m_DestinationTitle;

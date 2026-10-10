@@ -95,6 +95,7 @@ public partial class NavigationScreen
         }
         tiltToggle.onClick.AddListener(() => Set3D(!m_Map3D, true));
         pretendToggle.onClick.AddListener(() => SetPretend(!m_Pretend, true));
+        InitializeVoice();
 
         navigator.Arrived += OnArrived;
         navigator.Rerouted += OnRerouted;
@@ -111,6 +112,7 @@ public partial class NavigationScreen
             m_Appearance = PlayerPrefs.GetInt(AppearanceKey, AppearanceAuto);
             m_Map3D = PlayerPrefs.GetInt(Map3DKey, 1) == 1;
             m_Pretend = PlayerPrefs.GetInt(PretendKey, 0) == 1;
+            m_Voice = PlayerPrefs.GetInt(VoiceKey, 1) == 1;
         }
 
         FillHome();
@@ -177,6 +179,7 @@ public partial class NavigationScreen
         }
         if (location != null)
             location.Changed -= OnLocationChanged;
+        ReleaseVoice();
     }
 
     // Back from another app: the phone may have switched between light and dark.

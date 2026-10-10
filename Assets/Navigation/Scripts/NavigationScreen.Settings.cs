@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 using UnityEngine.UI;
 
-// Settings: your marker on the map, light or dark, the 3D map, and a pretend location for demos.
+// Settings: your marker on the map, light or dark, the 3D map, a pretend location for demos, and spoken directions.
 public partial class NavigationScreen
 {
     // Only from Home or Place.
@@ -90,6 +90,7 @@ public partial class NavigationScreen
             uiCamera.backgroundColor = Theme.Current.mapGround;
         StyleSettings();
         StyleEnd(true);
+        m_MicStyle = -1;   // ThemeColors put the mic's built colours back; Update styles it again
     }
 
     // While on Auto, the phone may switch between light and dark (at sunset, say) with the app in front, where
@@ -161,6 +162,19 @@ public partial class NavigationScreen
         StyleSettings();
     }
 
+    // Spoken directions and answers. Off, the app still listens and answers on screen.
+    void SetVoice(bool on, bool save)
+    {
+        m_Voice = on;
+        if (save && Application.isPlaying)
+        {
+            PlayerPrefs.SetInt(VoiceKey, on ? 1 : 0);
+            PlayerPrefs.Save();
+            Haptics.Tick(15);
+        }
+        StyleSettings();
+    }
+
     // The first entrance in the plan with a door.
     PlanPlace PretendEntrance()
     {
@@ -202,6 +216,8 @@ public partial class NavigationScreen
         }
         StyleSwitch(switchTrack, switchKnob, m_Map3D);
         StyleSwitch(pretendTrack, pretendKnob, m_Pretend);
+        if (voiceTrack != null)
+            StyleSwitch(voiceTrack, voiceKnob, m_Voice);
     }
 
     static void StyleSwitch(Image track, Image knob, bool on)

@@ -13,6 +13,9 @@ public partial class NavigationScreen
         Haptics.Tick(40);
         m_AnnouncedRoute = null;
         m_EndConfirmUntil = 0f;
+        m_BeginWhenTracking = false;
+        m_HerePlace = null;   // the user is about to walk away from it
+        m_HereDoor = null;
         ShowGuide();
     }
 
@@ -27,6 +30,9 @@ public partial class NavigationScreen
         m_ShownProgress = -1f;
         m_StatusY = float.NaN;
         m_EndStyle = -1;
+        m_SpokenRoute = null;
+        m_SaidOffRoute = m_SaidTrackingLost = false;
+        m_GuideLead = $"Head toward {m_DestinationTitle}. ";
         miniMap.Select(m_Destination);
         miniMap.ShowPin(miniMap.Anchor(m_Destination), null);
         UpdateGuide(true);
@@ -65,6 +71,9 @@ public partial class NavigationScreen
             thenTab.gameObject.SetActive(showThen);
         if (showThen)
             thenIcon.text = ManeuverIcon(then);
+
+        if (!instant)
+            SpeakGuide(step, distance, then, gap, arriving);
 
         // A buzz as each turn comes up, once.
         float at = navigator.Progress + distance;
@@ -175,6 +184,7 @@ public partial class NavigationScreen
     {
         Snack("New route from here");
         Haptics.Tick(40);
+        m_GuideLead = "New route. ";   // said with the first step of it
     }
 
     void OnArrived()
@@ -195,5 +205,6 @@ public partial class NavigationScreen
         SetInsets(24f, TopOf(arrivedCard) + 8f);
         map.ShowPlace(destination, !Application.isPlaying);
         Haptics.Tick(150);
+        Speak($"You've arrived. {arrivedDetail.text}.");
     }
 }
