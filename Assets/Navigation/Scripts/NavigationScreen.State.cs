@@ -13,7 +13,7 @@ public partial class NavigationScreen
     const float StartPeek = 196f;
     const float PlaceHeight = 560f;
     const float AlignHeight = 540f;
-    const float SettingsHeight = 1600f;
+    const float SettingsHeight = 1276f;
     const float KnobTravel = 22f;
 
     // How far the maps lean back with the 3D map on, in degrees.

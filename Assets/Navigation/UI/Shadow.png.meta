@@ -1,15 +1,15 @@
 fileFormatVersion: 2
-guid: c23d95568cf89ba49817f49c2f763a9c
+guid: e2aef1f5fa1459142b10ba02b7ab22be
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: -6633412340796966544
-    second: emoji_u26a1_0
+      213: 4093480436322176185
+    second: Shadow_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
     mipMapMode: 0
-    enableMipMap: 1
+    enableMipMap: 0
     sRGBTexture: 1
     linearTexture: 0
     fadeOut: 0
@@ -37,7 +37,7 @@ TextureImporter:
   maxTextureSize: 2048
   textureSettings:
     serializedVersion: 2
-    filterMode: 2
+    filterMode: 1
     aniso: 1
     mipBias: 0
     wrapU: 1
@@ -52,7 +52,7 @@ TextureImporter:
   alignment: 0
   spritePivot: {x: 0.5, y: 0.5}
   spritePixelsToUnits: 100
-  spriteBorder: {x: 0, y: 0, z: 0, w: 0}
+  spriteBorder: {x: 64, y: 64, z: 64, w: 64}
   spriteGenerateFallbackPhysicsShape: 1
   alphaUsage: 1
   alphaIsTransparency: 1
@@ -113,13 +113,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: emoji_u26a1_0
+      name: Shadow_0
       rect:
         serializedVersion: 2
         x: 0
         y: 0
-        width: 128
-        height: 128
+        width: 160
+        height: 160
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -128,8 +128,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 079ba121f9261f3a0800000000000000
-      internalID: -6633412340796966544
+      spriteID: 9bc8ef5c4c6fec830800000000000000
+      internalID: 4093480436322176185
       vertices: []
       indices: 
       edges: []

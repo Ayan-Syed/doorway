@@ -234,14 +234,14 @@ public partial class FloorMap
         return Mathf.Abs(at.x) < half.x && Mathf.Abs(at.y) < half.y;
     }
 
-    // The user's marker: an emoji on a disc, or the blue dot for null.
-    public void SetMarker(Sprite emoji)
+    // The user's marker: a shape (with its own rim), or the dot for null.
+    public void SetMarker(Sprite shape)
     {
-        bool avatar = emoji != null;
+        bool avatar = shape != null;
         puckAvatar.SetActive(avatar);
         puckDot.SetActive(!avatar);
-        if (avatar && puckEmoji != null)
-            puckEmoji.sprite = emoji;
+        if (avatar && puckShape != null)
+            puckShape.sprite = shape;
         MarkDirty();
     }
 

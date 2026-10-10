@@ -294,7 +294,8 @@ public partial class NavigationScreen
             return;
         statusText.text = message;
         statusDot.color = color;
-        RectTransform above = thenTab.gameObject.activeSelf ? thenTab : banner;
+        // Under the Then tab when it hangs below the banner; a Then chip inside the banner leaves it under the banner.
+        RectTransform above = thenTab.gameObject.activeSelf && !thenTab.IsChildOf(banner) ? thenTab : banner;
         float y = -(BottomOf(above) + 20f);
         if (y != m_StatusY)
         {

@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 656a3557fa2b0c045957a0bf7842fb45
+guid: 24b83fecfbf1d72468e525227523afa5
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 2632297053762854759
-    second: emoji_u1f642_0
+      213: 4257284689636642714
+    second: marker-hex_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -113,13 +113,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: emoji_u1f642_0
+      name: marker-hex_0
       rect:
         serializedVersion: 2
         x: 0
         y: 0
-        width: 128
-        height: 128
+        width: 256
+        height: 256
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -128,8 +128,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 76f97d0593cc78420800000000000000
-      internalID: 2632297053762854759
+      spriteID: a9f40818ed9e41b30800000000000000
+      internalID: 4257284689636642714
       vertices: []
       indices: 
       edges: []

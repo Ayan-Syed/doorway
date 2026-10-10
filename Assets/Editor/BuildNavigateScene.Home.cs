@@ -48,7 +48,7 @@ public static partial class BuildNavigateScene
         {
             RectTransform chip = Child(ChipNames[i], row);
             Size(chip, 0f, 84f);
-            screen.chips[i] = CardButton(chip, s_T.surface, SmallCorner, true, out Image chipSurface);
+            screen.chips[i] = CardButton(chip, s_T.surface, SmallCorner, true, out Image chipSurface, LowLift);
             screen.chipBackgrounds[i] = chipSurface;
             HorizontalRow(chip, 0f, TextAnchor.MiddleCenter).padding = new RectOffset(36, 36, 0, 0);
             screen.chipLabels[i] = LayoutText(chip, ChipNames[i], s_SemiBold, 36, s_T.onSurface);

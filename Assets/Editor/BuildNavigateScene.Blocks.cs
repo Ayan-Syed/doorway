@@ -12,13 +12,19 @@ public static partial class BuildNavigateScene
     const float SmallCorner = 22f;
     const float SheetCorner = 40f;
 
-    // A rounded surface: cards, sheets, chips. No shadow. edge: a hairline round it in the outline colour, for a
-    // card that would otherwise melt into the map under it. Neither part takes part in a layout group on rect.
-    // Returns the surface.
-    static Image Card(RectTransform rect, Color color, float radius, bool edge)
+    // How far a card's shadow spreads past it: Lift for cards over the map, LowLift for small things in tight
+    // spaces (chips, the user's dot, the map's icons, badges).
+    const float Lift = 36f;
+    const float LowLift = 14f;
+
+    // A rounded surface: cards, sheets, chips. edge: for a card over the map, which would otherwise melt into it,
+    // a soft shadow under it (lift: how far it spreads) and a hairline round it in the outline colour. None of the
+    // parts takes part in a layout group on rect. Returns the surface.
+    static Image Card(RectTransform rect, Color color, float radius, bool edge, float lift = Lift)
     {
         if (edge)
         {
+            Shadow(rect, lift);
             RectTransform outline = Stretch("Edge", rect, -2f, -2f, -2f, -2f);
             outline.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
             Rounded(outline, s_T.outline, radius + 2f).fillCenter = false;   // Only the rim: the surface covers the middle.
@@ -28,10 +34,27 @@ public static partial class BuildNavigateScene
         return Rounded(surface, color, radius);
     }
 
-    // A card that's a button: chips, the floor picker, Whole floor, Locate.
-    static Button CardButton(RectTransform rect, Color color, float radius, bool edge, out Image surface)
+    // UI/Shadow.png in the theme's shadow colour, behind everything else on rect: past its edges by lift, and fallen
+    // a little, so more shows below than above. The sprite's 40 px blur is stretched to lift.
+    static Image Shadow(RectTransform rect, float lift)
     {
-        surface = Card(rect, color, radius, edge);
+        float drop = lift * 0.22f;
+        RectTransform shadow = Stretch("Shadow", rect, -lift, -lift, -(lift - drop), -(lift + drop));
+        shadow.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+        shadow.SetAsFirstSibling();
+        var image = shadow.gameObject.AddComponent<Image>();
+        image.sprite = s_Shadow;
+        image.type = Image.Type.Sliced;
+        image.pixelsPerUnitMultiplier = 40f / lift;
+        image.color = s_T.shadow;
+        image.raycastTarget = false;
+        return image;
+    }
+
+    // A card that's a button: chips, the floor picker, Whole floor, Locate.
+    static Button CardButton(RectTransform rect, Color color, float radius, bool edge, out Image surface, float lift = Lift)
+    {
+        surface = Card(rect, color, radius, edge, lift);
         surface.raycastTarget = true;
         var button = rect.gameObject.AddComponent<Button>();
         button.targetGraphic = surface;

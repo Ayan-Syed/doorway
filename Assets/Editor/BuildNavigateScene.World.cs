@@ -23,8 +23,9 @@ public static partial class BuildNavigateScene
         // The band in the route colour, chevrons flowing toward the destination at a slow walk.
         Material ribbonMaterial = MaterialAsset("RouteRibbon", s_RibbonShader);
         ribbonMaterial.mainTexture = s_RouteMask;
-        ribbonMaterial.SetColor("_Color", s_T.primary);
-        ribbonMaterial.SetColor("_ChevronColor", s_T.onPrimary);
+        ribbonMaterial.SetColor("_Color", s_T.Ribbon);
+        ribbonMaterial.SetColor("_ChevronColor", s_T.RibbonChevron);
+        ribbonMaterial.SetColor("_GlowColor", s_T.ribbonGlow);
         ribbonMaterial.SetFloat("_ScrollSpeed", 1.2f);
         ribbonMaterial.renderQueue = 3002;
 

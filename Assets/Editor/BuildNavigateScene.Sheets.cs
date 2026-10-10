@@ -73,13 +73,41 @@ public static partial class BuildNavigateScene
     }
 
     // A section header; PlaceList copies it and sets the title.
+    // For a dropdown (PlaceList.AddSection), the whole header is the button, with the count and a chevron at the
+    // right and a hairline under it while closed; a plain section keeps those off.
     static GameObject SectionTemplate(RectTransform content)
     {
         RectTransform section = Child("Section", content);
         Size(section, 0f, 88f);
-        TextIn(Stretch("Title", section, 48f, 48f, 0f, 14f), "Rooms", s_SemiBold, 34, s_T.onSurfaceVariant,
+        var parts = section.gameObject.AddComponent<PlaceListSection>();
+        parts.button = FlatButton(section, 0f);
+        parts.button.enabled = false;
+        parts.title = TextIn(Stretch("Title", section, 48f, 200f, 0f, 14f), "Rooms", s_SemiBold, 34, s_T.onSurfaceVariant,
             TextAnchor.LowerLeft);
+        parts.count = TextIn(Stretch("Count", section, 48f, 112f, 0f, 14f), "7", s_Regular, 32, s_T.onSurfaceVariant,
+            TextAnchor.LowerRight);
+        parts.chevron = TextIn(Fixed("Chevron", section, new Vector2(1f, 0f), new Vector2(-72f, 36f), new Vector2(56f, 56f)),
+            PlaceList.IconMore, s_Icons, 48, s_T.onSurfaceVariant, TextAnchor.MiddleCenter);
+        parts.divider = Hairline(section).gameObject;
+        parts.count.gameObject.SetActive(false);
+        parts.chevron.gameObject.SetActive(false);
+        parts.divider.SetActive(false);
         return section.gameObject;
+    }
+
+    // A 2 px line along a list item's bottom, from the text's left edge.
+    static RectTransform Hairline(RectTransform parent)
+    {
+        RectTransform divider = Child("Divider", parent);
+        divider.anchorMin = Vector2.zero;
+        divider.anchorMax = new Vector2(1f, 0f);
+        divider.pivot = new Vector2(0.5f, 0f);
+        divider.offsetMin = new Vector2(48f, 0f);
+        divider.offsetMax = new Vector2(0f, 2f);
+        var line = divider.gameObject.AddComponent<Image>();
+        line.color = s_T.outline;
+        line.raycastTarget = false;
+        return divider;
     }
 
     // A place: its name, what it is under it (the name alone, centred, when there's nothing to say), and a
@@ -109,16 +137,18 @@ public static partial class BuildNavigateScene
         row.detail = TextIn(detail, "Lecture hall", s_Regular, 34, s_T.onSurfaceVariant, TextAnchor.MiddleLeft);
         Size(detail, 0f, 44f);
         BestFit(row.detail, 26);
+        row.textColumn = text;
 
-        RectTransform divider = Child("Divider", rect);
-        divider.anchorMin = Vector2.zero;
-        divider.anchorMax = new Vector2(1f, 0f);
-        divider.pivot = new Vector2(0.5f, 0f);
-        divider.offsetMin = new Vector2(48f, 0f);
-        divider.offsetMax = new Vector2(0f, 2f);
-        var line = divider.gameObject.AddComponent<Image>();
-        line.color = s_T.outline;
-        line.raycastTarget = false;
+        row.divider = Hairline(rect);
+
+        // "6 inside" and a chevron at the right, on a row with rooms inside it (PlaceList shows it and makes room).
+        RectTransform toggle = Fixed("Toggle", rect, new Vector2(1f, 0.5f), new Vector2(-160f, 0f), new Vector2(224f, 80f));
+        row.toggle = MakeButton(toggle, s_T.surfaceVariant, SmallCorner, out _);
+        row.toggleLabel = TextIn(Stretch("Label", toggle, 16f, 64f), "6 inside", s_SemiBold, 32, s_T.onSurfaceVariant,
+            TextAnchor.MiddleRight);
+        row.toggleIcon = TextIn(Fixed("Icon", toggle, new Vector2(1f, 0.5f), new Vector2(-38f, 0f), new Vector2(48f, 48f)),
+            PlaceList.IconMore, s_Icons, 44, s_T.onSurfaceVariant, TextAnchor.MiddleCenter);
+        toggle.gameObject.SetActive(false);
         return row;
     }
 }

@@ -3,7 +3,7 @@ rooms filled by what they are and outlined, the building outlined heavier, casti
 ground. The app draws room numbers and icons on top, so they stay upright as the map turns.
 
 Run after graph.py --export and segment.py: python basemap.py [theme ...]
-The labels, place grid, UI textures and icons are rebuilt every time, whatever themes are named.
+The labels, place grid, UI textures, icons and markers are rebuilt every time, whatever themes are named.
 places.bytes (little-endian): "DWPL", uint16 version (1), uint16 width, uint16 height, uint32 FNV-1a hash of the
 place ids (graph.place_id_hash), then a byte per 5 x 5 px cell, top row first: the place's index + 1, or 0.
 """
@@ -18,6 +18,7 @@ from scipy import ndimage
 
 import graph
 import icons
+import markers
 
 # Kept in step with Theme.cs. ("ground" is never drawn: the outside is transparent and the app paints
 # its own ground or the campus map behind.)
@@ -173,24 +174,42 @@ def places_and_labels(R, ids, texts, kinds):
 def ui_textures():
     S = 4
     os.makedirs(graph.UI_DIR, exist_ok=True)
-    # Route ribbon mask, scrolled along v by the route shader: red is the band (see-through in the middle,
-    # solid at the edges), green a chevron pointing forward (+v). The shader colours each.
+    # Route ribbon mask, scrolled along v by the route shader: red is the band (see-through in the middle, solid at
+    # the edges), green a chevron pointing forward (+v), blue a glow peaking on the band's edges and fading out past
+    # them. The band is the middle 60% across (u 0.2 to 0.8), so the glow has room: RouteRibbon's strip is
+    # BandWidth / 0.6 wide. The shader colours each.
     n = 256 * S
+    lo, hi, rim = 0.2, 0.8, 0.035
     band = Image.new("L", (n, n), 0)
     d = ImageDraw.Draw(band)
-    d.rectangle([0.04 * n, 0, 0.96 * n, n], fill=90)
-    d.rectangle([0.03 * n, 0, 0.09 * n, n], fill=255)
-    d.rectangle([0.91 * n, 0, 0.97 * n, n], fill=255)
+    d.rectangle([lo * n, 0, hi * n, n], fill=175)
+    d.rectangle([lo * n, 0, (lo + rim) * n, n], fill=255)
+    d.rectangle([(hi - rim) * n, 0, hi * n, n], fill=255)
     chevron = Image.new("L", (n, n), 0)
     d = ImageDraw.Draw(chevron)
-    pts = [(0.27 * n, 0.64 * n), (0.5 * n, 0.38 * n), (0.73 * n, 0.64 * n)]
-    d.line(pts, fill=255, width=int(0.10 * n), joint="curve")
-    r = 0.05 * n
+    across = lambda u: (lo + (hi - lo) * u) * n               # the old chevron, squeezed into the band
+    pts = [(across(0.27), 0.64 * n), (across(0.5), 0.38 * n), (across(0.73), 0.64 * n)]
+    d.line(pts, fill=255, width=int(0.08 * n), joint="curve")
+    r = 0.04 * n
     for x, y in (pts[0], pts[-1]):                          # round caps
         d.ellipse([x - r, y - r, x + r, y + r], fill=255)
-    zero, full = Image.new("L", (n, n), 0), Image.new("L", (n, n), 255)
-    mask = Image.merge("RGBA", (band, chevron, zero, full)).resize((256, 256), Image.LANCZOS)
+    u = (np.arange(n) + 0.5) / n
+    edge = np.minimum(np.abs(u - (lo + rim / 2)), np.abs(u - (hi - rim / 2)))
+    glow = np.exp(-(edge / 0.075) ** 2)
+    glow = Image.fromarray(np.tile((glow * 255).astype(np.uint8), (n, 1)), "L")
+    full = Image.new("L", (n, n), 255)
+    mask = Image.merge("RGBA", (band, chevron, glow, full)).resize((256, 256), Image.LANCZOS)
     mask.save(os.path.join(graph.UI_DIR, "RouteMask.png"))
+
+    # The soft shadow under a card over the map, 9-sliced (64 px borders): a rounded square 24 px in from a 40 px
+    # blur on every side, white for the theme's shadow colour to tint. The builder stretches it past the card.
+    n, blur, radius = 160, 40, 24
+    yy, xx = np.mgrid[0:n, 0:n] + 0.5
+    lo, hi = blur + radius, n - blur - radius
+    outside = np.hypot(np.clip(xx, lo, hi) - xx, np.clip(yy, lo, hi) - yy) - radius
+    shape = np.clip(0.5 - outside, 0, 1)
+    soft = ndimage.gaussian_filter(shape, blur / 2.6)
+    graph.white(soft / soft.max()).save(os.path.join(graph.UI_DIR, "Shadow.png"))
 
     # Heading beam for the you-are-here dot: a soft wedge widening upward, fading out.
     n = 256
@@ -216,6 +235,7 @@ def main():
     places_and_labels(R, ids, texts, kinds)
     ui_textures()
     icons.app_icons()
+    markers.marker_sprites()
     for theme in themes:
         # Full plan resolution, so it stays sharp zoomed in; the app places it by the plan's extent, not its size.
         render(theme, R, kind, dark).save(os.path.join(graph.DATA_DIR, f"ba1-floor1-map-{theme}.png"), optimize=True)

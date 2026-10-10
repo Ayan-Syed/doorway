@@ -18,8 +18,10 @@ public static partial class BuildNavigateScene
         ok &= SetImport(UIFolder + "/RouteMask.png", true, false, 256, 8, sRGB: false);   // A mask, not a colour.
         ok &= SetSprite(UIFolder + "/Pin.png", 0);
         ok &= SetSprite(UIFolder + "/Cone.png", 0);
+        ok &= SetSprite(UIFolder + "/Shadow.png", 64);
         if (!ok)
             return false;
+        s_Shadow = AssetDatabase.LoadAssetAtPath<Sprite>(UIFolder + "/Shadow.png");
         s_PlanImage = AssetDatabase.LoadAssetAtPath<Texture2D>(PlanImagePath);
         s_RouteMask = UITexture("RouteMask.png");
         s_Pin = AssetDatabase.LoadAssetAtPath<Sprite>(UIFolder + "/Pin.png");
@@ -143,13 +145,13 @@ public static partial class BuildNavigateScene
         return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
     }
 
-    // The marker emoji, as sprites: mipmapped, since they're drawn at under half their size. Null if any is missing.
-    static Sprite[] ImportEmoji()
+    // The marker shapes, as sprites: mipmapped, since they're drawn at under half their size. Null if any is missing.
+    static Sprite[] ImportMarkers()
     {
-        var sprites = new Sprite[MarkerEmoji.Length];
-        for (int i = 0; i < MarkerEmoji.Length; i++)
+        var sprites = new Sprite[MarkerShapes.Length];
+        for (int i = 0; i < MarkerShapes.Length; i++)
         {
-            string path = $"{EmojiFolder}/emoji_u{MarkerEmoji[i]}.png";
+            string path = $"{MarkerFolder}/marker-{MarkerShapes[i]}.png";
             TextureImporter importer = Importer(path, true);
             if (importer == null)
                 return null;
