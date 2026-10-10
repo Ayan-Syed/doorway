@@ -114,6 +114,41 @@ public partial class Localizer : MonoBehaviour
         if (navigator.Walkable == null)
             return;   // no walkable map: GPS only, every walk starts at a door (and no entrance prompt: nothing to snap)
         m_Location = FindAnyObjectByType<UserLocation>();
+        LoadFloor(walls);
+        if (signReader != null)
+            signReader.Sighted += AddSighting;
+        if (steps != null)
+            steps.Stepped += OnStepped;
+        if (navigator.planeManager != null)
+            navigator.planeManager.trackablesChanged.AddListener(OnPlanesChanged);
+        StartSensors();
+    }
+
+    // The navigator's floor, with these walls: the wall matcher, and the distance field built afresh. Start loads the
+    // first; after Navigator.SetFloor, the screen loads the new one here. Whatever was known on the last floor goes:
+    // the user is outdoors until they snap to a door of this one.
+    public void LoadFloor(TextAsset outlines)
+    {
+        if (navigator == null || navigator.Walkable == null)
+            return;
+        if (m_Engine != null)
+        {
+            GoOutdoors();
+            m_Engine.StateChanged -= OnEngineState;
+        }
+        walls = outlines;
+        m_Engine = null;
+        m_Field = null;
+        m_WallMatcher = null;
+        m_WallPoints = null;
+        m_WallRings = null;
+        m_SnappedTo = null;
+        m_PendingSnap = null;
+        m_SnapHistory.Clear();
+        m_Alternatives.Clear();
+        EntranceGuess = null;
+        EntrancePrompt = false;
+        m_NextGuess = 0f;
         if (walls != null)
         {
             try
@@ -132,15 +167,7 @@ public partial class Localizer : MonoBehaviour
         int[] rings = m_WallRings;
         m_FieldTask = Task.Run(() => DistanceField.Build(walkable, points, rings));
         if (signReader != null)
-        {
             signReader.SetTexts(navigator.SignTexts);
-            signReader.Sighted += AddSighting;
-        }
-        if (steps != null)
-            steps.Stepped += OnStepped;
-        if (navigator.planeManager != null)
-            navigator.planeManager.trackablesChanged.AddListener(OnPlanesChanged);
-        StartSensors();
     }
 
     void OnDestroy()

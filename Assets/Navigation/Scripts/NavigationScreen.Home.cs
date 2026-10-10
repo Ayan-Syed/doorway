@@ -189,10 +189,11 @@ public partial class NavigationScreen
             return;
         if (m_BuildingList == null)
         {
-            // The floor's own building first, then A to Z; names the map's font can't draw are left out.
+            // The floor's own building first, then the others with indoor maps, then A to Z; names the map's font
+            // can't draw are left out.
             m_BuildingList = campus.buildings
                 .Where(b => !string.IsNullOrEmpty(b.name) && FloorMap.Drawable(b.name))
-                .OrderBy(b => b.indoor ? 0 : 1)
+                .OrderBy(b => b == campus.indoor ? 0 : FloorOf(b) >= 0 ? 1 : 2)
                 .ThenBy(b => b.name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
             homeList.AddSection("Buildings");
@@ -201,7 +202,8 @@ public partial class NavigationScreen
         for (; m_BuildingRows < end; m_BuildingRows++)
         {
             CampusData.Building building = m_BuildingList[m_BuildingRows];
-            string detail = building.indoor ? $"Indoor map · {Plan.floor}" : "UCF · No indoor map yet";
+            string detail = building == campus.indoor ? $"Indoor map · {Plan.floor}"
+                : FloorOf(building) >= 0 ? "Indoor map" : "UCF · No indoor map yet";
             homeList.AddRow("building", building.name, detail, () => OnBuildingRow(building), searchOnly: true);
         }
         homeList.Refresh();

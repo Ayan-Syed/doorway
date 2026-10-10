@@ -26,7 +26,7 @@ public static partial class BuildNavigateScene
     const string ApkPath = "Builds/BuildingNav-Navigate.apk";
     const string PreviewFolder = "Builds/Previews";
     const string DataFolder = "Assets/Navigation/Data";
-    // The floor's files, Data/<floor>*, made by Tools/<floor>/make_data.py (BuildNavigateScene.Floors picks the floor).
+    // The scene's floor's files, Data/<floor>*, made by Tools/<floor>/make_data.py (BuildNavigateScene.Floors).
     static string PlanJsonPath => $"{DataFolder}/{s_Floor}.json";
     static string PlanImagePath => $"{DataFolder}/{s_Floor}-plan.png";
     static string PlaceMapPath => $"{DataFolder}/{s_Floor}-places.bytes";
@@ -81,15 +81,15 @@ public static partial class BuildNavigateScene
     [MenuItem("Navigation/Build Navigate Scene")]
     public static void Build()
     {
-        if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo() || !PickFloor())
+        if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
             return;
         if (CreateScene(DefaultTheme, out _))
             EditorUtility.DisplayDialog("Navigation",
-                $"Built {ScenePath} for {s_Floor} and set it as the only scene in Build Settings.", "OK");
+                $"Built {ScenePath} and set it as the only scene in Build Settings.", "OK");
     }
 
     // Unity.exe -batchmode -projectPath <project> -buildTarget Android -executeMethod BuildNavigateScene.BuildApk
-    //     [-theme paper] [-floor hec-floor1] [-versionCode N]
+    //     [-theme paper] [-versionCode N]
     // (No -quit needed: this exits by itself, 0 on success and 1 on any failure.) Signing: see ReleaseSettings.
     public static void BuildApk()
     {
@@ -97,7 +97,7 @@ public static partial class BuildNavigateScene
         {
             // A fresh clone has Unity's defaults (no ARCore, com.DefaultCompany, Mono): set ours first.
             ProjectSetup.Apply();
-            if (!PickFloor() || !ValidatePlan() || !CreateScene(ThemeArgument(), out _))
+            if (!ValidatePlan() || !CreateScene(ThemeArgument(), out _))
             {
                 EditorApplication.Exit(1);
                 return;
@@ -209,6 +209,10 @@ public static partial class BuildNavigateScene
         // Both maps' pictures; the day theme last, so it's the one the builder colours with.
         if (!UseTheme(NightTheme) || !UseTheme(theme))
             return false;
+        // Every building's floor, for the app to swap to (the scene is built for this one).
+        FloorAssets[] floors = LoadFloors(theme);
+        if (floors == null)
+            return false;
 
         s_HighlightMaterial = MaterialAsset("MapHighlight", s_HighlightShader);
         s_HighlightMaterial.SetFloat("_FillAlpha", 0.16f);
@@ -244,6 +248,7 @@ public static partial class BuildNavigateScene
         screen = CreateScreen(navigator);
         if (screen == null)
             return false;
+        screen.floors = floors;
         screen.localizer = localizer;
         if (screen.debugOverlay != null)
             screen.debugOverlay.localizer = localizer;

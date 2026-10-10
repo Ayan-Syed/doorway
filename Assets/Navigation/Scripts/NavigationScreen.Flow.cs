@@ -129,17 +129,7 @@ public partial class NavigationScreen
 
         FillHome();
         WireIndoor();
-        m_ShortName = string.IsNullOrEmpty(Plan.shortName) ? ShortName(Plan.building) : Plan.shortName;
-        NameFloor();
-        ShowPlanBuilding();
-
-        PlanPlace entrance = PretendEntrance();
-        pretendToggle.gameObject.SetActive(entrance != null);
-        if (entrance != null)
-        {
-            pretendTitle.text = $"Pretend I'm at {m_ShortName}";
-            pretendDetail.text = $"For demos: you're at its {PlaceStyle.Title(entrance)}";
-        }
+        NameBuilding();
 
         ApplyAppearance(true);
         SetMarker(m_Marker, false);
