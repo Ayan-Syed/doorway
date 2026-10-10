@@ -104,6 +104,55 @@ def test_not_a_doorway_log():
         dl.parse("walk,t,x\n1,2,3", "other.csv")
 
 
+def test_sync_reads_adb_devices_and_names_phones():
+    import sync
+    ready, waiting = sync.parse_devices("List of devices attached\nR5CT1\tdevice\nemulator-5554\toffline\n"
+                                        "9B2X\tunauthorized\n\n")
+    assert ready == ["R5CT1"] and waiting == [("emulator-5554", "offline"), ("9B2X", "unauthorized")]
+    name = sync.phone_name("SM-G991U (Galaxy S21)", "R5CT1")
+    assert name.startswith("SM-G991U-Galaxy-S21-") and len(name) == len("SM-G991U-Galaxy-S21-") + 4
+    assert sync.phone_name("", "x") .startswith("phone-") and sync.phone_name("A", "1") != sync.phone_name("A", "2")
+
+
+def test_sync_pulls_keeps_and_uploads_only_what_changed(tmp_path, monkeypatch):
+    import types
+    import sync
+    phone = tmp_path / "phone"
+    phone.mkdir()
+    (phone / "20261010-031500.csv").write_text("\n".join(WALK) + "\n", encoding="utf-8")
+
+    def fake_adb(path, *args, serial=None):
+        if args[0] == "devices":
+            return types.SimpleNamespace(returncode=0, stdout="List of devices attached\nR5CT1\tdevice\n", stderr="")
+        if args[0] == "shell":
+            return types.SimpleNamespace(returncode=0, stdout="Pixel 7\n", stderr="")
+        dest = os.path.join(args[2], "walks")   # adb pull <remote> <dir> makes <dir>/walks
+        os.makedirs(dest)
+        for f in phone.iterdir():
+            open(os.path.join(dest, f.name), "w", encoding="utf-8").write(f.read_text(encoding="utf-8"))
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    sent = []
+    monkeypatch.setattr(sync, "adb", fake_adb)
+    monkeypatch.setattr(sync, "ARCHIVE", str(tmp_path / "Walks"))
+    monkeypatch.setattr(sync.upload, "send", lambda plan, *a, **k: sent.append(plan))
+    args = types.SimpleNamespace(serial=None, results=None, dry_run=False, profile=None,
+                                 catalog="workspace", schema="doorway", volume="logs")
+    manifest = str(tmp_path / "Walks" / "uploaded.json")
+    name = sync.phone_name("Pixel 7", "R5CT1")
+
+    assert sync.sync_once(args, "adb", manifest) == 1
+    assert sent[0][0][1] == f"/Volumes/workspace/doorway/logs/walks/{name}/20261010-031500.csv"
+    assert (tmp_path / "Walks" / name / "20261010-031500.csv").is_file()
+    assert sync.sync_once(args, "adb", manifest) == 0                   # nothing changed: nothing goes up
+    (phone / "20261010-031500.csv").write_text("\n".join(WALK + ["e,4.000,arrived"]) + "\n", encoding="utf-8")
+    (phone / "20261010-032000.csv").write_text("\n".join(INDOOR) + "\n", encoding="utf-8")
+    assert sync.sync_once(args, "adb", manifest) == 2                   # the grown walk and the new session
+    (phone / "20261010-031500.csv").unlink()                            # the phone dropped its oldest log...
+    assert sync.sync_once(args, "adb", manifest) == 0
+    assert (tmp_path / "Walks" / name / "20261010-031500.csv").is_file()   # ...the computer kept it
+
+
 def test_upload_takes_only_doorway_logs(tmp_path, capsys):
     import upload   # signs in to nothing on a dry run, so it needs no databricks-sdk here
     (tmp_path / "20261010-031500.csv").write_text("\n".join(WALK) + "\n", encoding="utf-8")

@@ -15,6 +15,7 @@ Needs databricks-sdk (Tools/databricks/requirements.txt); the rest of Tools does
 import argparse
 import glob
 import os
+import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -54,6 +55,33 @@ def ensure_volume(client, catalog, schema, volume):
     print(f"Made the volume {catalog}.{schema}.{volume}")
 
 
+def cli_path():
+    """The Databricks CLI, for signing in with its profile: on the PATH, or where winget puts it (a terminal opened
+    before it was installed doesn't have it on the PATH yet). None if neither."""
+    found = shutil.which("databricks")
+    if found:
+        return found
+    packages = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Packages")
+    matches = sorted(glob.glob(os.path.join(packages, "Databricks.DatabricksCLI_*", "databricks.exe")))
+    return matches[-1] if matches else None
+
+
+def send(plan, catalog, schema, volume, profile=None):
+    """Uploads each (local file, volume path) in plan, making the schema and volume first if they're missing."""
+    from databricks.sdk import WorkspaceClient
+    from databricks.sdk.core import Config
+    options = {"profile": profile} if profile else {}
+    cli = cli_path()
+    if cli:
+        options["databricks_cli_path"] = cli   # Config takes it; WorkspaceClient itself doesn't
+    client = WorkspaceClient(config=Config(**options))
+    ensure_volume(client, catalog, schema, volume)
+    for local, remote in plan:
+        with open(local, "rb") as f:
+            client.files.upload(remote, f, overwrite=True)
+        print(f"{local} -> {remote}")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("paths", nargs="+", help="walk log files, or folders of them")
@@ -83,13 +111,7 @@ def main(argv=None):
         print(f"{len(plan)} files (dry run: nothing uploaded)")
         return 0
 
-    from databricks.sdk import WorkspaceClient
-    client = WorkspaceClient(profile=args.profile) if args.profile else WorkspaceClient()
-    ensure_volume(client, args.catalog, args.schema, args.volume)
-    for local, remote in plan:
-        with open(local, "rb") as f:
-            client.files.upload(remote, f, overwrite=True)
-        print(f"{local} -> {remote}")
+    send(plan, args.catalog, args.schema, args.volume, args.profile)
     print(f"Uploaded {len(plan)} files. Run Tools/databricks/ingest.py in the workspace to rebuild the tables.")
     return 0
 

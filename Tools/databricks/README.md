@@ -9,7 +9,8 @@ the app needs no network: logs come off the phone with `adb`, as they do for `Re
 | file | what it does | runs on |
 |---|---|---|
 | `doorway_logs.py` | reads a walk log (`PoseLog.cs`'s format) into rows; sums up each log; checkpoint errors | anywhere (standard library) |
-| `upload.py` | puts walk logs and `Builds/Eval/results.csv` in a Databricks volume | your computer |
+| `sync.py` | pulls the logs off every phone plugged in and uploads the new ones (once, or `--watch`) | your computer |
+| `upload.py` | puts a folder of walk logs and `Builds/Eval/results.csv` in a Databricks volume | your computer |
 | `ingest.py` | a Databricks notebook: rebuilds the tables from the volume, with three summary queries | Databricks |
 
 Tests: `Tools/tests/test_databricks.py` (no Databricks needed).
@@ -28,12 +29,22 @@ Tests: `Tools/tests/test_databricks.py` (no Databricks needed).
 
 ## Each time
 
+Plug the phone in (USB debugging on) and run, from the repository:
+
 ```sh
-adb pull /sdcard/Android/data/com.ayansyed.doorway/files/walks
-pip install -r Tools/databricks/requirements.txt
-python Tools/databricks/upload.py walks --dry-run          # what would go up
-python Tools/databricks/upload.py walks --results Builds/Eval/results.csv
+pip install -r Tools/databricks/requirements.txt           # once
+python Tools/databricks/sync.py --dry-run                  # what would go up
+python Tools/databricks/sync.py                            # pull every phone plugged in, upload what's new
+python Tools/databricks/sync.py --watch 30                 # keep at it: plugging a phone in is all it takes
 ```
+
+`sync.py` keeps every log in `Builds/Walks/<phone>/` (the phone keeps only its last 10) and uploads only new or
+changed ones, to `walks/<phone>/` in the volume, so teammates' phones never overwrite each other. `<phone>` is the
+model and a short hash of the serial. Add `--profile <name>` if your CLI profile isn't `DEFAULT`, and
+`--results Builds/Eval/results.csv` to send ReplayEvaluator's results too. It finds `adb` on the PATH or in Unity's
+Android support.
+
+`upload.py walks` does the same for a folder of logs pulled by hand, or sent by a teammate without the workspace.
 
 Then open `Tools/databricks/ingest.py` in the Git folder and *Run all*. Every run rebuilds every table from the
 volume, so run it again whenever new logs go up.
