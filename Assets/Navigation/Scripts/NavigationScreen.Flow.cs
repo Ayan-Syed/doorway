@@ -129,7 +129,7 @@ public partial class NavigationScreen
 
         FillHome();
         WireIndoor();
-        m_ShortName = ShortName(Plan.building);
+        m_ShortName = string.IsNullOrEmpty(Plan.shortName) ? ShortName(Plan.building) : Plan.shortName;
         NameFloor();
         ShowPlanBuilding();
 

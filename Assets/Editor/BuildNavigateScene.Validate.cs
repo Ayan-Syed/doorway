@@ -8,8 +8,6 @@ using UnityEngine;
 // plan's geo fit). BuildApk stops here on bad data instead of shipping an app that fails on the phone.
 public static partial class BuildNavigateScene
 {
-    const string WalkableDataPath = DataFolder + "/ba1-floor1-walkable.bytes";
-
     // Null if every file reads and they agree; otherwise what's wrong, naming the file.
     public static string DataProblem()
     {
@@ -19,7 +17,7 @@ public static partial class BuildNavigateScene
 
     static string DataProblem(TextAsset json)
     {
-        return DataProblem(json.text, Bytes(PlaceMapPath), Bytes(WallsPath), Bytes(WalkableDataPath),
+        return DataProblem(json.text, Bytes(PlaceMapPath), Bytes(WallsPath), Bytes(WalkablePath),
             Bytes(CampusGeometryPath), AssetDatabase.LoadAssetAtPath<TextAsset>(CampusInfoPath)?.text);
     }
 
@@ -36,7 +34,7 @@ public static partial class BuildNavigateScene
         if (walls == null)
             return $"Missing {WallsPath}.";
         if (walkable == null)
-            return $"Missing {WalkableDataPath}.";
+            return $"Missing {WalkablePath}.";
         if ((campus == null) != (campusJson == null))
             return $"Only one of {CampusGeometryPath} and {CampusInfoPath} is there.";
         try
@@ -48,7 +46,7 @@ public static partial class BuildNavigateScene
             foreach (PlanNode node in plan.nodes)
             {
                 if (!ground.IsWalkable(node.Position))
-                    return $"{WalkableDataPath}: walkway point \"{node.id}\" is on a cell nobody can stand on.";
+                    return $"{WalkablePath}: walkway point \"{node.id}\" is on a cell nobody can stand on.";
             }
 
             if (campus != null)
@@ -56,7 +54,7 @@ public static partial class BuildNavigateScene
                 CampusData data = CampusData.Parse(campus, campusJson, CampusGeometryPath);
                 if (data.geo == null || !SameGeo(data.geo, plan.geo))
                     return $"{CampusGeometryPath}: projected with a different geo fit than {PlanJsonPath}; "
-                           + "run Tools/ba1-floor1/make_data.py --campus.";
+                           + $"run Tools/{s_Floor}/make_data.py --campus.";
             }
         }
         catch (FormatException e)

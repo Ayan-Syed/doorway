@@ -134,6 +134,7 @@ public static partial class ReplayEvaluator
         readonly List<WallObservation> m_Planes = new List<WallObservation>();
         readonly List<Vector2> m_Alternatives = new List<Vector2>();
         readonly List<float> m_AlternativeYaws = new List<float>();
+        readonly List<Vector3> m_History = new List<Vector3>();
 
         public Feeder(LocalizerEngine engine) => m_Engine = engine;
 
@@ -149,7 +150,7 @@ public static partial class ReplayEvaluator
                 return false;
             switch (c[0])
             {
-                case "n":   // n,t,door,x,z,yaw,camx,camz[,k,(x,z,yaw)...]
+                case "n":   // n,t,door,x,z,yaw,camx,camz[,k,(x,z,yaw)...[,h,(dt,x,z)...]]
                 {
                     m_Alternatives.Clear();
                     m_AlternativeYaws.Clear();
@@ -159,7 +160,13 @@ public static partial class ReplayEvaluator
                         m_Alternatives.Add(V(c, 9 + 3 * j));
                         m_AlternativeYaws.Add(F(c[11 + 3 * j]));
                     }
-                    m_Engine.Snap(t, V(c, 3), F(c[5]), V(c, 6), m_Alternatives, m_AlternativeYaws);
+                    // [,h,(dt,x,z)*h]: the camera's track before the snap (dt seconds before it, negative).
+                    m_History.Clear();
+                    int at = 9 + 3 * k;
+                    int h = c.Length > at ? int.Parse(c[at], CultureInfo.InvariantCulture) : 0;
+                    for (int j = 0; j < h; j++)
+                        m_History.Add(new Vector3(F(c[at + 2 + 3 * j]), F(c[at + 3 + 3 * j]), F(c[at + 1 + 3 * j])));
+                    m_Engine.Snap(t, V(c, 3), F(c[5]), V(c, 6), m_Alternatives, m_AlternativeYaws, m_History);
                     break;
                 }
                 case "l":

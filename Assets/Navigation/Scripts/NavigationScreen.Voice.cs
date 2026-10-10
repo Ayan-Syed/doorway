@@ -10,8 +10,9 @@ using UnityEngine.UI;
 // name, or describe: a second landmark ("by the stairs") or the phone's location tells apart places that share a
 // description, and when nothing does, the app asks which one. A destination given as a kind ("the nearest
 // restroom") is the one the shortest walk away.
-// After a question the app listens again by itself, once it has finished speaking, so a whole route can be set
-// up hands-free: "take me to 107" / "where are you?" / "the north entrance" / "...say start" / "start".
+// The mic listens for one thing said, then stays off until the mic button is tapped again: a question the app
+// asks ("where are you?") is answered by tapping and saying it, and the question is kept until then, so a bare
+// answer ("the north entrance") still means the right thing.
 // Spoken directions (a setting, on by default) read out each turn as it comes up and at the turn, arriving,
 // a new route, and being off the route.
 public partial class NavigationScreen
@@ -58,7 +59,6 @@ public partial class NavigationScreen
         m_HerePlace = null;
         m_HereDoor = null;
         m_BeginWhenTracking = false;
-        m_ListenAfterSpeech = false;
         m_Retries = 0;
     }
 
@@ -73,7 +73,6 @@ public partial class NavigationScreen
             return;
         }
         m_Conversing = true;
-        m_ListenAfterSpeech = false;
         if (voiceOutput != null)
             voiceOutput.Stop();
         Listen();
@@ -513,12 +512,15 @@ public partial class NavigationScreen
             voiceOutput.Say(text);
     }
 
-    // A question: answered, then the microphone opens once it's said (when the user has been talking).
+    // A question: shown and spoken like an answer, and kept for the next time the user taps the mic. The mic
+    // doesn't open by itself.
     void Ask(VoiceAsk ask, string text, string[] options = null)
     {
         m_Question = new VoiceQuestion { ask = ask, text = text, options = options };
-        Reply(text);
-        m_ListenAfterSpeech = m_Conversing && voiceInput != null;
+        m_LastSaid = text;
+        Snack(micButton != null && micButton.gameObject.activeSelf ? $"{text} · Tap the mic to answer" : text);
+        if (m_Voice && voiceOutput != null)
+            voiceOutput.Say(text);
     }
 
     // Guidance: spoken only, the banner shows it. Never over the user talking.
@@ -531,7 +533,7 @@ public partial class NavigationScreen
             voiceOutput.Say(text);
     }
 
-    // Every frame: the mic button, the listening snackbar, and listening again after a question.
+    // Every frame: the mic button and the listening snackbar.
     void UpdateVoice()
     {
         if (voiceInput == null || micButton == null)
@@ -541,12 +543,6 @@ public partial class NavigationScreen
         {
             snackbar.alpha = 1f;
             m_SnackbarHideTime = Time.unscaledTime + 0.6f;
-        }
-        else if (m_ListenAfterSpeech && (voiceOutput == null || !voiceOutput.IsSpeaking))
-        {
-            m_ListenAfterSpeech = false;
-            Listen();
-            listening = true;
         }
         if (m_Step == Step.Align && m_BeginWhenTracking && navigator.IsTracking)
         {

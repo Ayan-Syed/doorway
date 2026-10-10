@@ -24,10 +24,16 @@ public partial class NavigationScreen
     //   Sure     Localized, or converging and narrow: guidance as usual
     //   Unsure   converging and wide: the banner says it's finding the spot, no turn or distance, no turn buzz, the
     //            ribbon faint and still, the minimap's dot haloed
+    //   TurnUnsure  sure enough across the corridor but not along it (AlongSpread: ARCore's scale error) with a turn
+    //            within that much (plus TurnMargin) ahead, where it decides which corridor "Turn right" means: the
+    //            banner says a turn is coming without the distance, no turn buzz, the ribbon as usual. Mid-corridor
+    //            the along error doesn't matter and is ignored.
     //   Lost     the banner asks for a room number, no ribbon
-    // Into Unsure past UnsureEnter and out under UnsureLeave, each only once it has held for GuidanceHold, so the
-    // banner never flickers between the two. Lost comes and goes at once (the Localizer's own state is steady).
-    enum Guidance { Sure, Unsure, Lost }
+    // Into Unsure (or TurnUnsure) past UnsureEnter and out under UnsureLeave, each only once it has held for
+    // GuidanceHold, so the banner never flickers. Lost comes and goes at once (the Localizer's own state is steady).
+    public enum Guidance { Sure, TurnUnsure, Unsure, Lost }
+    const float TurnMargin = 3f;
+    const string TurnComing = "Turn coming up · watch for the corridor";
     const float UnsureEnter = 2.5f;
     const float UnsureLeave = 2f;
     const float GuidanceHold = 1f;
@@ -37,16 +43,32 @@ public partial class NavigationScreen
     Guidance m_Guidance;
     float m_GuidancePending = -1f;   // since when the other state has been called for
 
-    Guidance JudgeGuidance(bool instant)
+    // The guidance the position calls for, before the GuidanceHold delay: the rule itself, pure, so the stress
+    // evaluator can apply exactly this. toTurn: metres to the next turn (infinity with none before the destination).
+    // previous: the guidance shown now, for the hysteresis (each threshold is entered past UnsureEnter and left under
+    // UnsureLeave).
+    public static Guidance WantedGuidance(LocalizerState state, float spread, float alongSpread, float toTurn,
+        Guidance previous)
     {
-        if (m_Indoor.state == LocalizerState.Lost)
+        if (state == LocalizerState.Lost)
+            return Guidance.Lost;
+        bool wide = state == LocalizerState.Converging
+                    && (previous == Guidance.Unsure ? spread >= UnsureLeave : spread > UnsureEnter);
+        if (wide)
+            return Guidance.Unsure;
+        bool nearTurn = toTurn <= alongSpread + TurnMargin;
+        bool stretched = previous == Guidance.TurnUnsure ? alongSpread >= UnsureLeave : alongSpread > UnsureEnter;
+        return nearTurn && stretched ? Guidance.TurnUnsure : Guidance.Sure;
+    }
+
+    Guidance JudgeGuidance(bool instant, float toTurn)
+    {
+        Guidance want = WantedGuidance(m_Indoor.state, m_Indoor.spread, m_Indoor.alongSpread, toTurn, m_Guidance);
+        if (want == Guidance.Lost)
         {
             m_GuidancePending = -1f;
             return m_Guidance = Guidance.Lost;
         }
-        bool wide = m_Indoor.state == LocalizerState.Converging
-                    && (m_Guidance == Guidance.Unsure ? m_Indoor.spread >= UnsureLeave : m_Indoor.spread > UnsureEnter);
-        Guidance want = wide ? Guidance.Unsure : Guidance.Sure;
         if (want == m_Guidance)
             m_GuidancePending = -1f;
         else if (instant || m_Guidance == Guidance.Lost)
@@ -120,11 +142,15 @@ public partial class NavigationScreen
         if (!Application.isPlaying)
             m_Indoor = ReadIndoor();   // previews: no Update has read it
         Guidance was = m_Guidance;
-        Guidance guidance = JudgeGuidance(instant);
-        bool sure = guidance == Guidance.Sure;
         Maneuver step = navigator.NextStep(out float distance, out Maneuver then, out float gap);
         bool now = distance < NowDistance;
         bool arriving = step == Maneuver.Arrive;
+        float toTurn = arriving || step == Maneuver.Straight ? float.PositiveInfinity : distance;
+        Guidance guidance = JudgeGuidance(instant, toTurn);
+        // Sure of where the user is: the ribbon, the ETA and the minimap as usual (TurnUnsure only hides the turn's
+        // distance and its buzz).
+        bool sure = guidance == Guidance.Sure || guidance == Guidance.TurnUnsure;
+        bool turnSure = guidance == Guidance.Sure;
 
         if (navigator.ribbon != null)
             navigator.ribbon.SetGuidance(sure ? 1f : guidance == Guidance.Unsure ? UnsureRibbon : 0f, sure,
@@ -137,6 +163,16 @@ public partial class NavigationScreen
             maneuverDistance.text = "";
             maneuverTitle.text = lostSpot ? "Point your camera at a room number" : "Finding your exact spot…";
             maneuverDetail.text = lostSpot ? m_TowardText : "Keep the camera up and keep walking";
+            if (thenTab.gameObject.activeSelf)
+                thenTab.gameObject.SetActive(false);
+        }
+        else if (!turnSure)
+        {
+            // Which corridor the turn is in isn't certain: the way it turns, not when.
+            maneuverIcon.text = ManeuverIcon(step);
+            maneuverDistance.text = "";
+            maneuverTitle.text = TurnComing;
+            maneuverDetail.text = m_TowardText;
             if (thenTab.gameObject.activeSelf)
                 thenTab.gameObject.SetActive(false);
         }
@@ -172,7 +208,7 @@ public partial class NavigationScreen
 
         // A buzz as each turn comes up, once, and only when sure of it.
         float at = navigator.Progress + distance;
-        if (sure && now && !arriving && (route != m_AnnouncedRoute || Mathf.Abs(at - m_AnnouncedAt) > 2f))
+        if (turnSure && now && !arriving && (route != m_AnnouncedRoute || Mathf.Abs(at - m_AnnouncedAt) > 2f))
         {
             m_AnnouncedRoute = route;
             m_AnnouncedAt = at;

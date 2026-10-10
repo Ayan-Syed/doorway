@@ -347,7 +347,40 @@ public static partial class SyntheticWalks
             snapLine.Append(',').Append(F(floor.doorSpots[d].x, 3)).Append(',').Append(F(floor.doorSpots[d].y, 3))
                 .Append(',').Append(F(yaw, 2));
         }
+        // The camera's track before the tap (as Localizer buffers it): standing at the door; or, tapped a few steps
+        // in, walking in from TrackOutside metres outside the door along the user's path to where they stand.
+        var track = new List<Vector2>();
+        var trackRandom = new System.Random(seed * 7 + 3);   // its own: the other streams stay as they were
+        if (info.insideSnap)
+        {
+            var walkIn = new List<Vector2> { path[0] - doorAway * TrackOutside };
+            for (int i = 0; i < startLeg; i++)
+                walkIn.Add(path[i]);
+            walkIn.Add(truth);
+            float total = 0f;
+            for (int i = 1; i < walkIn.Count; i++)
+                total += Vector2.Distance(walkIn[i - 1], walkIn[i]);
+            for (double back = TrackSeconds; back >= 0.0; back -= TrackStep)
+                track.Add(AlongBack(walkIn, total, (float)back * info.speed));
+        }
+        else
+        {
+            for (double back = TrackSeconds; back >= 0.0; back -= TrackStep)
+                track.Add(truth + new Vector2(Gaussian(trackRandom), Gaussian(trackRandom)) * 0.02f);
+        }
+        snapLine.Append(',').Append(track.Count);
+        for (int i = 0; i < track.Count; i++)
+        {
+            Vector2 arPoint = ar + PositionFilter.ToPlan(world.ToWorld(track[i]) - world.ToWorld(truth), -arYaw) * info.arScale;
+            snapLine.Append(',').Append(F(-(TrackSeconds - i * TrackStep), 2)).Append(',').Append(F(arPoint.x, 3))
+                .Append(',').Append(F(arPoint.y, 3));
+        }
         log.Add(snapLine.ToString());
+        // The route being guided (r,t,k,(x,z)*k): the truth's companion, for scoring guidance near turns.
+        var routeLine = new StringBuilder(Row("r", t, route.Length));
+        foreach (Vector2 p in route)
+            routeLine.Append(',').Append(F(p.x, 3)).Append(',').Append(F(p.y, 3));
+        log.Add(routeLine.ToString());
         log.Add(Row("c", t, "start", truth.x, truth.y));
 
         // Walk.
@@ -901,6 +934,25 @@ public static partial class SyntheticWalks
                 near.Add(s.text);
         }
         return near.Count > 0 ? near[random.Next(near.Count)] : signs[random.Next(signs.Count)].text;
+    }
+
+    // The camera's track before a snap: TrackSeconds of it, a point every TrackStep; walking in from TrackOutside metres
+    // outside the door.
+    const double TrackSeconds = 8.0, TrackStep = 0.1;
+    const float TrackOutside = 2f;
+
+    // The point back metres before the end of a polyline total metres long (its start, further back than that).
+    static Vector2 AlongBack(List<Vector2> line, float total, float back)
+    {
+        float distance = Mathf.Max(0f, total - back);
+        for (int i = 1; i < line.Count; i++)
+        {
+            float l = Vector2.Distance(line[i - 1], line[i]);
+            if (distance <= l)
+                return Vector2.Lerp(line[i - 1], line[i], l > 0f ? distance / l : 0f);
+            distance -= l;
+        }
+        return line[line.Count - 1];
     }
 
     static Vector2 Along(List<Vector2> path, float distance, out int leg)

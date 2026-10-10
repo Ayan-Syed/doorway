@@ -89,6 +89,33 @@ public class LocalizerStressTests
         RarelyShownWrong(Replays(data, SeedsWith(data, SyntheticWalks.Tier.Typical, Triggers[trap], 3)), trap);
     }
 
+    // The door tapped a few steps in: the camera's track before the tap says the user was walking (not standing back to
+    // the door), and the snap takes its heading from the walk and its place along the way in; standing snaps stay
+    // as they were. Before, these were the top of the guided-error tail (guided 18 to 23 m off).
+    [Test]
+    public void ATappedInSnapIsReadFromTheWalkAndRarelyShownWrong()
+    {
+        EvaluationData data = Data();
+        SyntheticWalks.Floor floor = data.StressFloor();
+        var inside = SeedsWith(data, SyntheticWalks.Tier.Typical, i => i.insideSnap && !i.wrongSnap, 6);
+        var standing = SeedsWith(data, SyntheticWalks.Tier.Typical, i => !i.insideSnap, 6);
+        foreach (int seed in inside.Concat(standing))
+        {
+            var lines = SyntheticWalks.Stress(floor, SyntheticWalks.Tier.Typical, seed, out SyntheticWalks.StressInfo info);
+            var engine = new LocalizerEngine(data.plan, data.walkable, data.field, data.walls, LocalizerEngine.Config.Full, 1);
+            var feeder = new ReplayEvaluator.Feeder(engine);
+            foreach (string line in lines)
+            {
+                feeder.Feed(line, out string[] c, out _);
+                if (c != null && c[0] == "n")
+                    break;
+            }
+            Assert.AreEqual(info.insideSnap, engine.LastSnapMotion != LocalizerEngine.SnapMotion.Standing,
+                $"seed {seed}: {engine.LastSnapMotion}");
+        }
+        RarelyShownWrong(Replays(data, inside), "a door tapped a few steps in");
+    }
+
     // Easy walks with a wrong plate: one plate (or two at once that can't both be right) used to start the cloud again
     // tens of metres off, where without plates it never strayed 3 m. Now it stays close, sure or not.
     [Test]

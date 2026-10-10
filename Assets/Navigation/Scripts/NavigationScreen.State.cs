@@ -155,7 +155,7 @@ public partial class NavigationScreen
     // The conversation (NavigationScreen.Voice).
     IVoiceInterpreter m_Interpreter;
     bool m_Voice = true;           // spoken directions and answers (Settings)
-    bool m_Conversing;             // the user has used the mic: questions listen for the answer by themselves
+    bool m_Conversing;             // the user has used the mic: the app talks them through lining up
     VoiceQuestion m_Question;      // what was last asked, so a bare answer means the right thing
     readonly List<(PlanPlace place, PlanDoor door)> m_Choices = new List<(PlanPlace place, PlanDoor door)>();
     bool m_ChoicesAreDestinations;
@@ -163,7 +163,6 @@ public partial class NavigationScreen
     PlanPlace m_HerePlace;         // where the user said they are
     PlanDoor m_HereDoor;
     bool m_BeginWhenTracking;      // said "start" before AR was tracking
-    bool m_ListenAfterSpeech;
     int m_Retries;
     string m_LastSaid;             // for "repeat that"
     int m_MicStyle = -1;

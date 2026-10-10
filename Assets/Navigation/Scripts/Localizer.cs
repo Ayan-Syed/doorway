@@ -198,6 +198,38 @@ public partial class Localizer : MonoBehaviour
             CompleteSnap();
     }
 
+    // The camera's track while AR runs before a snap (the snap card open, or the snap pending): the last TrackSeconds,
+    // a point every TrackStep seconds. The engine reads from it whether the user stood at the door or walked in.
+    readonly Queue<(double t, Vector2 xz)> m_Track = new Queue<(double, Vector2)>();
+    readonly List<Vector3> m_SnapHistory = new List<Vector3>();
+    const double TrackSeconds = 8.0, TrackStep = 0.1;
+
+    void Track(double t, Vector2 xz)
+    {
+        if (m_Track.Count > 0)
+        {
+            double last = 0;
+            foreach (var p in m_Track)
+                last = p.t;
+            if (t - last < TrackStep)
+                return;
+        }
+        m_Track.Enqueue((t, xz));
+        while (m_Track.Count > 0 && t - m_Track.Peek().t > TrackSeconds)
+            m_Track.Dequeue();
+    }
+
+    /// <summary>The snap card opened: the track starts afresh (how far the user walked counts from here at most).
+    /// </summary>
+    public void BeginSnapWatch() => m_Track.Clear();
+
+    /// <summary>The snap card closed without a snap.</summary>
+    public void EndSnapWatch()
+    {
+        if (m_PendingSnap == null)
+            m_Track.Clear();
+    }
+
     /// <summary>A door was picked and the snap waits for ARCore to track (see SnapToDoor).</summary>
     public bool SnapPending => m_PendingSnap != null;
 
@@ -225,8 +257,20 @@ public partial class Localizer : MonoBehaviour
             LogXZ(m_Alternatives[k]);
             m_Log?.Add(m_AlternativeYaws[k], 2);
         }
+        // The camera's track before the tap (seconds before it, x, z): walking in or standing at the door.
+        m_SnapHistory.Clear();
+        foreach (var (at, xz) in m_Track)
+            m_SnapHistory.Add(new Vector3(xz.x, xz.y, (float)(at - t)));
+        m_Log?.Add(m_SnapHistory.Count);
+        foreach (Vector3 h in m_SnapHistory)
+        {
+            m_Log?.Add(h.z, 2);
+            m_Log?.Add(h.x, 3);
+            m_Log?.Add(h.y, 3);
+        }
         m_Log?.EndRow();
-        m_Engine.Snap(t, spot, yaw, camera, m_Alternatives, m_AlternativeYaws);
+        m_Engine.Snap(t, spot, yaw, camera, m_Alternatives, m_AlternativeYaws, m_SnapHistory);
+        m_Track.Clear();
         Publish();
         ApplyIndoors();
     }
@@ -336,6 +380,8 @@ public partial class Localizer : MonoBehaviour
     {
         if (navigator == null)
             return;
+        if (navigator.IsTracking && (m_PendingSnap != null || !Indoors))
+            Track(Now, CameraXZ);
         if (m_PendingSnap != null && navigator.IsTracking)
             CompleteSnap();
         if (!Indoors)

@@ -2,13 +2,14 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-// One floor's walkways and places, exported from the floor plan (Data/ba1-floor1.json).
+// One floor's walkways and places, exported from the floor plan (Data/ba1-floor1.json, or another floor's).
 // Positions are plan metres: x toward the plan's right, z toward the plan's top. Vector2 (x, z) throughout.
 // Field names match the JSON keys, because JsonUtility maps them by name.
 [Serializable]
 public class FloorPlan
 {
     public string building;
+    public string shortName;       // what people call the building ("HEC"); empty: its initials (NavigationScreen)
     public string floor;
     public List<PlanNode> nodes = new List<PlanNode>();
     public List<PlanEdge> edges = new List<PlanEdge>();
@@ -256,7 +257,7 @@ public sealed class DataReader
         for (int i = 0; i < 4; i++)
         {
             if (m_Bytes[i] != magic[i])
-                throw Fail($"not a {magic} file; build it again with Tools/ba1-floor1/make_data.py");
+                throw Fail($"not a {magic} file; build it again with the floor's Tools/<floor>/make_data.py");
         }
         m_At = 4;
         int found = UInt16();

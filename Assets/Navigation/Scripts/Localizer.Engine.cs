@@ -148,6 +148,7 @@ public sealed partial class LocalizerEngine
     Vector2 m_LastEstimate;
     bool m_HadEstimate;
     bool m_NeedsSign;
+    Motion m_SnapMotion;
     string m_PlacedBy;
     string m_Contradicted;   // the last plate nothing in the cloud could have seen, and when
     double m_ContradictedAt = double.NegativeInfinity;
@@ -261,8 +262,35 @@ public sealed partial class LocalizerEngine
 
     // With the other doors the snap might really have been at (their spots, and the plan's yaw if it was there).
     public void Snap(double t, Vector2 spot, float baseYaw, Vector2 camera, IReadOnlyList<Vector2> alternatives,
-        IReadOnlyList<float> alternativeYaws)
+        IReadOnlyList<float> alternativeYaws) => Snap(t, spot, baseYaw, camera, alternatives, alternativeYaws, null);
+
+    // And the camera's track over the seconds before (world x, z in x, y; seconds before the snap, negative, in z;
+    // oldest first): see Localizer.Motion.cs.
+    public void Snap(double t, Vector2 spot, float baseYaw, Vector2 camera, IReadOnlyList<Vector2> alternatives,
+        IReadOnlyList<float> alternativeYaws, IReadOnlyList<Vector3> history)
     {
+        Motion motion = Analyse(history, camera);
+        float inward = DoorInward(spot);
+        if (motion.kind == SnapMotion.Walking && float.IsNaN(inward))
+            motion.kind = SnapMotion.Standing;
+        LastSnapMotion = motion.kind;
+        if (motion.kind == SnapMotion.Walking)
+        {
+            // The plan turned so the walk's way is the door's inward way; each other door by its own.
+            baseYaw = Mathf.DeltaAngle(0f, motion.heading - inward);
+            if (alternatives != null)
+            {
+                var yaws = new List<float>(alternativeYaws);
+                for (int k = 0; k < yaws.Count; k++)
+                {
+                    float other = DoorInward(alternatives[k]);
+                    if (!float.IsNaN(other))
+                        yaws[k] = Mathf.DeltaAngle(0f, motion.heading - other);
+                }
+                alternativeYaws = yaws;
+            }
+        }
+        m_SnapMotion = motion;
         m_Time = t;
         m_SnapSpot = spot;
         m_SnapYaw = baseYaw;
@@ -271,13 +299,30 @@ public sealed partial class LocalizerEngine
         int others = alternatives?.Count ?? 0, count = SnapParticles;
         m_Filter.SetCount(count);
         m_Filter.Reset(spot, camera, baseYaw, SnapSpread, SnapHeadingSpread, SnapHeadingLimit, true);
+        int main = count - (others > 0 ? Mathf.Max(1, Mathf.RoundToInt(count * AlternativeShare / others)) * others : 0);
         m_Scans = 0;
         m_Evidence = 0;
         m_NeedsSign = false;
         m_HadEstimate = false;
         m_FixWalk = 0f;
-        int near = Mathf.RoundToInt(count * NearShare);
-        m_Filter.SeedNear(0, near, spot, baseYaw, NearFrom, NearReach, SnapHeadingSpread);
+        if (motion.kind == SnapMotion.Walking)
+        {
+            // Along the inward way, as far as the walk could have come.
+            m_Filter.SeedLine(0, main, spot, PositionFilter.HeadingVector(inward), LineFrom, motion.walked + LineMargin,
+                LineLateral, baseYaw, WalkHeadingSpread);
+        }
+        else if (motion.kind == SnapMotion.Turned)
+        {
+            // Past the vestibule: anywhere the walk could have reached, any heading, and a plate before sure.
+            m_Filter.FreeHeading();
+            m_Filter.SeedNear(0, main, spot, baseYaw, LineFrom, motion.walked + LineMargin, 180f);
+            m_NeedsSign = true;
+        }
+        else
+        {
+            int near = Mathf.RoundToInt(count * NearShare);
+            m_Filter.SeedNear(0, near, spot, baseYaw, NearFrom, NearReach, SnapHeadingSpread);
+        }
         if (others > 0)
         {
             m_Filter.FreeHeading();   // another door faces another way

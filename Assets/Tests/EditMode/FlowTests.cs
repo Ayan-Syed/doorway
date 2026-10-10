@@ -19,6 +19,8 @@ public class FlowTests
         public Vector2 Position { get; set; }
         public float Heading { get; set; }
         public float Spread { get; set; } = 1f;
+        public float AlongSpread { get; set; }
+        public PlanDoor From;   // where BeginFrom started the walk
         public bool NeedsView { get; set; }
         public bool AskForSign => State == LocalizerState.Lost || AskReason != null;
         public string AskReason { get; set; }
@@ -75,6 +77,7 @@ public class FlowTests
             }
             if (best == null)
                 return false;
+            From = best;
             navigator.Preview(best, to, 0f, 0f, false);
             return navigator.Route != null;
         }
@@ -240,6 +243,76 @@ public class FlowTests
         Tap(m_Screen.snapConfirm);
         Assert.IsNotNull(m_Fake.Snapped);
         Assert.IsFalse(m_Screen.SnapCardOpen);
+    }
+
+    // The walk's progress where the next step is a turn this far ahead (within a metre), or NaN if there's none.
+    float ProgressBeforeTurn(float ahead)
+    {
+        Navigator navigator = m_Screen.navigator;
+        float length = navigator.Route.length;
+        for (float progress = 0f; progress < length; progress += 0.25f)
+        {
+            navigator.Preview(m_Fake.From, Place("121"), progress, 0f, false);
+            Maneuver step = navigator.NextStep(out float distance, out _, out _);
+            if (step != Maneuver.Arrive && step != Maneuver.Straight && Mathf.Abs(distance - ahead) < 1f)
+                return progress;
+        }
+        return float.NaN;
+    }
+
+    [Test]
+    public void GuidanceRule()
+    {
+        var g = NavigationScreen.Guidance.Sure;
+        Assert.AreEqual(NavigationScreen.Guidance.Lost, NavigationScreen.WantedGuidance(LocalizerState.Lost, 1f, 0f, 50f, g));
+        Assert.AreEqual(NavigationScreen.Guidance.Unsure,
+            NavigationScreen.WantedGuidance(LocalizerState.Converging, 3f, 0f, 50f, g));
+        // Along-route error only near a turn: 4 m of it matters 5 m before a turn, not 20 m before.
+        Assert.AreEqual(NavigationScreen.Guidance.TurnUnsure,
+            NavigationScreen.WantedGuidance(LocalizerState.Localized, 1f, 4f, 5f, g));
+        Assert.AreEqual(NavigationScreen.Guidance.Sure, NavigationScreen.WantedGuidance(LocalizerState.Localized, 1f, 4f, 20f, g));
+        Assert.AreEqual(NavigationScreen.Guidance.Sure,
+            NavigationScreen.WantedGuidance(LocalizerState.Localized, 1f, 4f, float.PositiveInfinity, g));
+        // Hysteresis: 2.2 m isn't enough to enter, but is to stay.
+        Assert.AreEqual(NavigationScreen.Guidance.Sure, NavigationScreen.WantedGuidance(LocalizerState.Localized, 1f, 2.2f, 1f, g));
+        Assert.AreEqual(NavigationScreen.Guidance.TurnUnsure, NavigationScreen.WantedGuidance(LocalizerState.Localized, 1f, 2.2f, 1f,
+            NavigationScreen.Guidance.TurnUnsure));
+        Assert.AreEqual(NavigationScreen.Guidance.Sure, NavigationScreen.WantedGuidance(LocalizerState.Localized, 1f, 1.9f, 1f,
+            NavigationScreen.Guidance.TurnUnsure));
+    }
+
+    [Test]
+    public void NearATurnAlongErrorHidesTheDistance()
+    {
+        WalkTo121();
+        float progress = ProgressBeforeTurn(3f);
+        Assume.That(progress, Is.Not.NaN, "no turn on the walk to 121");
+        m_Fake.AlongSpread = 4f;
+        Frame();
+        Frame(1.1f);
+        Assert.AreEqual("Turn coming up · watch for the corridor", m_Screen.maneuverTitle.text);
+        Assert.AreEqual("", m_Screen.maneuverDistance.text, "no distance to a turn it can't place");
+        Assert.AreEqual(1f, RibbonAlpha, "the ribbon stays");
+
+        m_Fake.AlongSpread = 1f;
+        Frame();
+        Frame(1.1f);
+        Assert.AreNotEqual("Turn coming up · watch for the corridor", m_Screen.maneuverTitle.text);
+        Assert.AreNotEqual("", m_Screen.maneuverDistance.text);
+    }
+
+    [Test]
+    public void MidCorridorAlongErrorIsIgnored()
+    {
+        WalkTo121();
+        float progress = ProgressBeforeTurn(12f);
+        Assume.That(progress, Is.Not.NaN, "no stretch of 12 m before a turn on the walk to 121");
+        m_Fake.AlongSpread = 4f;   // 12 m out: past 4 + 3
+        Frame();
+        Frame(1.1f);
+        Assert.AreNotEqual("Turn coming up · watch for the corridor", m_Screen.maneuverTitle.text);
+        Assert.AreNotEqual("", m_Screen.maneuverDistance.text, "the turn's distance shows");
+        Assert.AreEqual(1f, RibbonAlpha);
     }
 
     [Test]

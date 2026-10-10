@@ -37,7 +37,7 @@ public partial class FloorMap
         height = reader.UInt16();
         uint hash = reader.UInt32();
         if (plan != null && hash != plan.PlaceIdHash())
-            throw reader.Fail("made for a different list of places than the floor plan's; run Tools/ba1-floor1/make_data.py");
+            throw reader.Fail("made for a different list of places than the floor plan's; run the floor's Tools/<floor>/make_data.py");
         byte[] cells = reader.Bytes(width * height);
         reader.End();
         int count = plan?.places.Count ?? 255;
