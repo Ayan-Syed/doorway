@@ -73,7 +73,7 @@ public static partial class BuildNavigateScene
     static Texture2D s_PlanImage, s_Basemap, s_RouteMask, s_Logo;
     static TextAsset s_PlaceMap, s_Walls, s_CampusGeometry, s_CampusInfo;
     static Material s_HighlightMaterial, s_WallMaterial;
-    static Sprite s_Pin, s_Cone;
+    static Sprite s_Pin, s_Cone, s_Shadow;
     static Sprite[] s_Markers;
 
     [MenuItem("Navigation/Build Navigate Scene")]

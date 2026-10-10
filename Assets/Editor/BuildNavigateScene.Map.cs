@@ -91,11 +91,12 @@ public static partial class BuildNavigateScene
         number.gameObject.AddComponent<CanvasGroup>();
         map.labelTemplate = number;
 
-        // A place's icon on a disc in its colour, with a white rim. The disc must be the last Image (FloorMap
-        // colours it).
+        // A place's icon on a disc in its colour, with a white rim and a small shadow. The disc must be the last
+        // Image (FloorMap colours it).
         RectTransform icons = Stretch("Place Icons", overlay);
         RectTransform badge = Fixed("Place Icon", icons, Center, Vector2.zero, new Vector2(56f, 56f) * s);
         badge.gameObject.AddComponent<CanvasGroup>();
+        Shadow(badge, LowLift * s);
         Rounded(Stretch("Rim", badge), s_T.surface, 28f * s);
         Rounded(Stretch("Disc", badge, 4f * s, 4f * s, 4f * s, 4f * s), s_T.restroom, 28f * s - 4f * s);
         TextIn(Stretch("Glyph", badge), PlaceStyle.IconRestroom, s_Icons, Mathf.RoundToInt(32f * s), s_T.onPlace,
@@ -134,7 +135,7 @@ public static partial class BuildNavigateScene
         beam.raycastTarget = false;
         map.puckCone = beam.gameObject;
         RectTransform dot = Fixed("Dot", you, Center, Vector2.zero, new Vector2(50f, 50f) * s);
-        Card(dot, Color.white, 25f * s, true);
+        Card(dot, Color.white, 25f * s, true, LowLift * s);
         map.puckFill = Dot("Fill", dot, Center, Vector2.zero, 36f * s, s_T.primary);
         map.puckDot = dot.gameObject;
         RectTransform avatar = Fixed("Avatar", you, Center, Vector2.zero, new Vector2(84f, 84f) * s);
@@ -147,13 +148,13 @@ public static partial class BuildNavigateScene
         map.puckShape = shape;
         // A "?" on the marker's shoulder while the position is lost (FloorMap.TintPuck).
         RectTransform unknown = Fixed("Unknown", you, Center, new Vector2(30f, 30f) * s, new Vector2(40f, 40f) * s);
-        Card(unknown, s_T.onSurfaceVariant, 20f * s, true);
+        Card(unknown, s_T.onSurfaceVariant, 20f * s, true, LowLift * s * 0.6f);
         TextIn(Stretch("Mark", unknown), "?", s_Bold, Mathf.RoundToInt(30f * s), Color.white, TextAnchor.MiddleCenter);
         unknown.gameObject.SetActive(false);
         map.puckUnknown = unknown.gameObject;
         // A tick in the same spot, for a moment after the Localizer confirms a snap.
         RectTransform check = Fixed("Check", you, Center, new Vector2(30f, 30f) * s, new Vector2(40f, 40f) * s);
-        Card(check, s_T.good, 20f * s, true);
+        Card(check, s_T.good, 20f * s, true, LowLift * s * 0.6f);
         TextIn(Stretch("Mark", check), IconDone, s_Icons, Mathf.RoundToInt(30f * s), Color.white, TextAnchor.MiddleCenter);
         check.gameObject.SetActive(false);
         map.puckCheck = check.gameObject;

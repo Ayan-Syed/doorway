@@ -193,6 +193,16 @@ def ui_textures():
     mask = Image.merge("RGBA", (band, chevron, zero, full)).resize((256, 256), Image.LANCZOS)
     mask.save(os.path.join(graph.UI_DIR, "RouteMask.png"))
 
+    # The soft shadow under a card over the map, 9-sliced (64 px borders): a rounded square 24 px in from a 40 px
+    # blur on every side, white for the theme's shadow colour to tint. The builder stretches it past the card.
+    n, blur, radius = 160, 40, 24
+    yy, xx = np.mgrid[0:n, 0:n] + 0.5
+    lo, hi = blur + radius, n - blur - radius
+    outside = np.hypot(np.clip(xx, lo, hi) - xx, np.clip(yy, lo, hi) - yy) - radius
+    shape = np.clip(0.5 - outside, 0, 1)
+    soft = ndimage.gaussian_filter(shape, blur / 2.6)
+    graph.white(soft / soft.max()).save(os.path.join(graph.UI_DIR, "Shadow.png"))
+
     # Heading beam for the you-are-here dot: a soft wedge widening upward, fading out.
     n = 256
     yy, xx = np.mgrid[0:n, 0:n]

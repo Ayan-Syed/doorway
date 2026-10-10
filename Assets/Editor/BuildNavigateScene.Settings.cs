@@ -48,7 +48,7 @@ public static partial class BuildNavigateScene
             if (i == 0)
             {
                 RectTransform dot = Fixed("Dot", cell, Center, new Vector2(0f, 22f), new Vector2(64f, 64f));
-                Card(dot, Color.white, 32f, true);
+                Card(dot, Color.white, 32f, true, LowLift);
                 Dot("Fill", dot, Center, Vector2.zero, 46f, s_T.primary);
             }
             else

@@ -311,9 +311,9 @@ public partial class NavigationScreen
         Theme theme = Theme.Current;
         for (int i = 0; i < chips.Length && i < ChipKinds.Length; i++)
         {
-            bool on = m_Kind == ChipKinds[i];
-            chipBackgrounds[i].color = on ? theme.primaryContainer : theme.surface;
-            chipLabels[i].color = on ? theme.primary : theme.onSurface;
+            bool on = m_Kind == ChipKinds[i];   // on: filled in the accent, so it reads as on at a glance
+            chipBackgrounds[i].color = on ? theme.primary : theme.surface;
+            chipLabels[i].color = on ? theme.onPrimary : theme.onSurface;
         }
     }
 

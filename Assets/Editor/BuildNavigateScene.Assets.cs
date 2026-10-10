@@ -18,8 +18,10 @@ public static partial class BuildNavigateScene
         ok &= SetImport(UIFolder + "/RouteMask.png", true, false, 256, 8, sRGB: false);   // A mask, not a colour.
         ok &= SetSprite(UIFolder + "/Pin.png", 0);
         ok &= SetSprite(UIFolder + "/Cone.png", 0);
+        ok &= SetSprite(UIFolder + "/Shadow.png", 64);
         if (!ok)
             return false;
+        s_Shadow = AssetDatabase.LoadAssetAtPath<Sprite>(UIFolder + "/Shadow.png");
         s_PlanImage = AssetDatabase.LoadAssetAtPath<Texture2D>(PlanImagePath);
         s_RouteMask = UITexture("RouteMask.png");
         s_Pin = AssetDatabase.LoadAssetAtPath<Sprite>(UIFolder + "/Pin.png");
