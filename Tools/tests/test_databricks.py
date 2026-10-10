@@ -78,6 +78,8 @@ def test_indoor_rows_by_their_own_columns():
 def test_checkpoint_errors():
     errors = dl.checkpoint_errors(dl.parse("\n".join(INDOOR), "i"))
     assert [e["door"] for e in errors] == ["d110", "d121"]
+    # ingest.py's queries group checkpoints by app version and floor.
+    assert errors[0]["version"] == "1.4.0" and errors[0]["place"] == "Business Administration I Floor 1"
     assert errors[0]["error_m"] == pytest.approx(5.0) and errors[0]["state"] == "Localized"
     assert errors[1]["error_m"] == pytest.approx(1.0) and errors[1]["state"] == "Lost"
 

@@ -172,8 +172,9 @@ def checkpoint_errors(log):
         r = before[-1] if before else None
         error = math.hypot(r["x"] - c["x"], r["z"] - c["z"]) if r else math.nan
         state = STATES[int(r["state"])] if r and math.isfinite(r["state"]) and 0 <= r["state"] < len(STATES) else ""
-        out.append({"log": log.name, "t": c["t"], "door": c["door"], "x": c["x"], "z": c["z"],
-                    "error_m": error, "state": state, "spread": r["spread"] if r else math.nan})
+        out.append({"log": log.name, "version": log.version, "place": log.place, "t": c["t"], "door": c["door"],
+                    "x": c["x"], "z": c["z"], "error_m": error, "state": state,
+                    "spread": r["spread"] if r else math.nan})
     return out
 
 
