@@ -2,7 +2,7 @@
 
   python make_data.py            -> Assets/Navigation/Data/hec-floor1.json, -plan.png, -map-<theme>.png,
                                     -places.bytes, -walls.bytes, -walkable.bytes; check images in check/
-  python make_data.py --campus   the same, then Tools/campus/campus.py --floor hec-floor1 (ucf-campus-hec-floor1.*)
+  python make_data.py --campus   the same, then Tools/campus/campus.py (ucf-campus.*, which marks HEC indoor too)
 
 Same formats as BA1's (Tools/ba1-floor1 documents each file), drawn the same way: basemap.py's themes and line
 widths, walls.py's outlines, walkable.py's door cuts and 10 cm cells. What differs is where the rooms, doors and
@@ -30,7 +30,7 @@ import graph as ba1
 import walkable as ba1_walkable
 import walls
 
-CAMPUS = "ucf-campus-hec-floor1"
+CAMPUS = "ucf-campus"          # one campus map: every floor is in BA1's plan metres
 CAMPUS_SCRIPT = os.path.join(hec.BOX, "Tools", "campus", "campus.py")
 DOOR_WIDTH = 0.9      # metres cut through the wall at each door (walkable.py's)
 THROUGH = 0.8         # metres past the wall the cut goes
@@ -299,7 +299,7 @@ def main():
     walkable_grid(b, Rs, plan)
     check_images(b)
     if "--campus" in sys.argv:
-        result = subprocess.run([sys.executable, CAMPUS_SCRIPT, "--floor", hec.FLOOR], cwd=os.path.dirname(CAMPUS_SCRIPT))
+        result = subprocess.run([sys.executable, CAMPUS_SCRIPT], cwd=os.path.dirname(CAMPUS_SCRIPT))
         if result.returncode != 0:
             sys.exit(f"campus.py failed (exit {result.returncode})")
     print(datacheck.summary(hec.FLOOR))

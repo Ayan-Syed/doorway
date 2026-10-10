@@ -5,7 +5,8 @@ outline and 45 room polygons in the pixels of a 1400 x 800 review drawing. Its e
 most rooms have no known number (temporary ids U01 to U45). So unlike BA1 there is no scan to read walls and
 doors from; everything here is drawn from the polygons:
   - the drawing is fitted to OpenStreetMap's outline of HEC (FIT, redone by python hec.py --fit), which gives its
-    scale and where it sits on Earth, and lines it up with the building on the campus map;
+    scale and where it sits on Earth, and is then put in BA1 floor 1's plan metres (Frame), so the two floors and
+    the campus map share one frame and the app switches between the buildings without moving the map;
   - the rooms are drawn onto a raster at BA1's resolution (so basemap.py's line widths mean the same here), and
     the slivers between rooms that are too narrow to walk (tracing gaps) go to the room beside them;
   - the hallways' centre lines become the walkway graph, each room gets one door in the middle of its longest
@@ -24,6 +25,8 @@ from scipy import ndimage
 HERE = os.path.dirname(os.path.abspath(__file__))
 BOX = os.path.normpath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(BOX, "Tools", "ba1-floor1"))     # basemap, walls, datacheck, graph
+
+import graph              # noqa: E402  (BA1's: its GEO is the frame both floors share)
 
 SOURCE = os.path.join(BOX, "FloorPlans", "knighthacks-data", "HEC-floor1-rooms-knighthacks-traced.json")
 ONSITE = os.path.join(HERE, "onsite.json")
@@ -75,22 +78,36 @@ def onsite():
 
 
 class Frame:
-    """Drawing px -> raster px -> plan metres. The raster covers the outline plus MARGIN; plan (0, 0) is its middle;
-    plan x is the drawing's right and plan z its top, so the plan sits as drawn, turned by FIT's angle from north."""
+    """Drawing px -> plan metres -> raster px. The plan metres are BA1 floor 1's (graph.GEO), so both floors and the
+    one campus map share a frame and the app can show either without moving the map. The raster is axis-aligned
+    in that frame (HEC's walls run at an angle across it, as BA1's do) and covers the outline plus MARGIN."""
 
     def __init__(self, outline):
-        pts = np.asarray(outline, float)
-        self.f = FIT["metersPerPixel"] * PX_PER_M          # raster px per drawing px
-        pad = MARGIN / FIT["metersPerPixel"]
-        self.x0, self.y0 = pts[:, 0].min() - pad, pts[:, 1].min() - pad
-        self.width = int(math.ceil((pts[:, 0].max() + pad - self.x0) * self.f))
-        self.height = int(math.ceil((pts[:, 1].max() + pad - self.y0) * self.f))
-        self.origin = (self.width / 2.0, self.height / 2.0)
+        self.geo_block = dict(graph.GEO)
+        p = self.plan(outline)
+        self.left, self.top = p[:, 0].min() - MARGIN, p[:, 1].max() + MARGIN
+        self.width = int(math.ceil((p[:, 0].max() + MARGIN - self.left) * PX_PER_M))
+        self.height = int(math.ceil((self.top - p[:, 1].min() + MARGIN) * PX_PER_M))
+        self.origin = (-self.left * PX_PER_M, self.top * PX_PER_M)    # the raster px of plan (0, 0)
+
+    def plan(self, pts):
+        """Drawing px -> plan metres (N x 2): FIT to latitude and longitude, then BA1's PlanGeo.ToPlan."""
+        p = np.asarray(pts, float).reshape(-1, 2)
+        s, a, rad = FIT["metersPerPixel"], math.radians(FIT["angle"]), math.pi / 180
+        x, y = p[:, 0], -p[:, 1]
+        east = s * (x * math.cos(a) - y * math.sin(a)) + FIT["east"]
+        north = s * (x * math.sin(a) + y * math.cos(a)) + FIT["north"]
+        lat = FIT["lat"] + north / (EARTH_RADIUS * rad)
+        lon = FIT["lon"] + east / (EARTH_RADIUS * rad * math.cos(FIT["lat"] * rad))
+        g = self.geo_block
+        e = (lon - g["lon"]) * rad * EARTH_RADIUS * math.cos(g["lat"] * rad)
+        n = (lat - g["lat"]) * rad * EARTH_RADIUS
+        b = math.radians(g["angle"])
+        return np.stack([e * math.cos(b) - n * math.sin(b) + g["x"], e * math.sin(b) + n * math.cos(b) + g["z"]], 1)
 
     def raster(self, pts):
         """Drawing px -> raster px, as an N x 2 array."""
-        p = np.asarray(pts, float).reshape(-1, 2)
-        return np.stack([(p[:, 0] - self.x0) * self.f, (p[:, 1] - self.y0) * self.f], 1)
+        return np.asarray([self.to_px(x, z) for x, z in self.plan(pts)])
 
     def to_m(self, x, y):
         """Raster px -> plan metres, rounded to 1 mm (graph.to_m, for this raster)."""
@@ -100,17 +117,8 @@ class Frame:
         return x * PX_PER_M + self.origin[0], -z * PX_PER_M + self.origin[1]
 
     def geo(self):
-        """The plan's geo block (PlanGeo): east/north metres from (lat, lon), turned by angle and moved by (x, z),
-        are plan metres. From FIT and this raster."""
-        s, a = FIT["metersPerPixel"], math.radians(FIT["angle"])
-        # plan = s * (x, -y) + k, and (east, north) = rotate(a) * s * (x, -y) + b
-        k = np.array([-s * self.x0 - self.origin[0] / PX_PER_M, s * self.y0 + self.origin[1] / PX_PER_M])
-        b = np.array([FIT["east"], FIT["north"]])
-        c, n = math.cos(-a), math.sin(-a)
-        rb = np.array([b[0] * c - b[1] * n, b[0] * n + b[1] * c])
-        x, z = k - rb
-        return {"lat": FIT["lat"], "lon": FIT["lon"], "angle": round(math.degrees(-a) % 360, 3),
-                "x": round(float(x), 3), "z": round(float(z), 3)}
+        """The plan's geo block: BA1's, since the plan metres are BA1's."""
+        return self.geo_block
 
 
 def fill(shape, polygons):

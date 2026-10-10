@@ -316,6 +316,71 @@ public class FlowTests
     }
 
     [Test]
+    public void WalkingStraightWithThePhoneSwingingSaysNoTurn()
+    {
+        WalkTo121();
+        Navigator nav = m_Screen.navigator;
+        Assume.That(nav.Route.turns.Count == 0 || nav.Route.turns[0].distance > 4f, "the first turn is too close to test");
+        // Facing 80 degrees off the route (the phone pointed at the room numbers), walking straight along it.
+        nav.Preview(m_Fake.From, Place("121"), 0f, 80f, false);
+        Route route = nav.Route;
+        Vector2 start = route.PointAt(0f), dir = route.DirectionAt(0f);
+        int sides = 0, lastSide = 0;
+        for (int i = 0; i <= 28; i++)
+        {
+            float d = i * 0.1f;
+            Vector2 p = start + dir * d;
+            float swing = i % 2 == 0 ? 80f : -80f;
+            nav.arCamera.SetPositionAndRotation(new Vector3(p.x, 1.4f, p.y),
+                Quaternion.Euler(0f, Navigator.Heading(dir) + swing, 0f));
+            Maneuver step = nav.NextStep(out float distance, out _, out _);
+            bool turnNow = distance < 0.01f && step != Maneuver.Arrive && step != Maneuver.Straight;
+            if (turnNow)
+            {
+                int side = step == Maneuver.SlightLeft || step == Maneuver.Left || step == Maneuver.SharpLeft ? 1 : -1;
+                if (side != lastSide)
+                    sides++;
+                lastSide = side;
+            }
+            if (d >= 1.6f)
+                Assert.IsFalse(turnNow, $"walking straight at {d:0.0} m, yet {step} now");
+        }
+        Assert.LessOrEqual(sides, 1, "the first turn flipped sides");
+    }
+
+    [Test]
+    public void NoRerouteUnlessSure()
+    {
+        Assert.IsFalse(Navigator.MayReroute(LocalizerState.Converging, 4f, 0f, 50f), "unsure");
+        Assert.IsFalse(Navigator.MayReroute(LocalizerState.Lost, 1f, 0f, 50f), "lost");
+        Assert.IsFalse(Navigator.MayReroute(LocalizerState.Localized, 1f, 4f, 3f), "a turn it can't place");
+        Assert.IsTrue(Navigator.MayReroute(LocalizerState.Localized, 1f, 4f, 30f), "mid-corridor");
+        Assert.IsTrue(Navigator.MayReroute(LocalizerState.Converging, 1.5f, 0f, 50f));
+        Assert.IsTrue(Navigator.MayReroute(LocalizerState.Outdoors, 30f, 0f, 1f));
+    }
+
+    [Test]
+    public void ARerouteOntoTheSameWayIsSilent()
+    {
+        Navigator nav = m_Screen.navigator;
+        PlanPlace to = Place("121"), from = Place("113");
+        Route old = nav.PlanRoute(from.doors[0], to);
+        Route same = nav.PlanRoute(from.doors[0], to);
+        Assert.IsTrue(Navigator.SameStart(old, 0f, same), "the same way on: kept, no toast");
+        // A door well away from the old route, so the new one starts somewhere else.
+        PlanPlace far = m_Plan.places.Find(p =>
+        {
+            if (p == to || p.doors.Count == 0)
+                return false;
+            old.Project(m_Plan.NodePosition(p.doors[0].node), 0f, out float off);
+            return off > 6f;
+        });
+        Assume.That(far, Is.Not.Null);
+        Route other = nav.PlanRoute(far.doors[0], to);
+        Assert.IsFalse(Navigator.SameStart(old, 0f, other), "a different way: a real reroute");
+    }
+
+    [Test]
     public void NotNowIsntAskedAgainUntilReRaised()
     {
         m_Fake.EntrancePrompt = true;

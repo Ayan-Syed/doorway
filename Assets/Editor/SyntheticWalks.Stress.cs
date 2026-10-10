@@ -63,6 +63,9 @@ public static partial class SyntheticWalks
         public int people;                             // up to
         public float glassPass;                        // share of glass that depth sees straight through
         public float noise, missingMin, missingMax, bias, noDepth;
+        // The share of depth rays that give a point at all, on top of the missing ones (the first field walk on a
+        // Note 10 gave a median of 7 points a scan, the generator's typical 34 before this).
+        public float depthKeep;
         public float driftMin, driftMax, arScale;      // degrees per root minute; ± scale
         public float jumpsPerMinute, lossesPerMinute, lossMin, lossMax;
         public float wallMiss;
@@ -81,7 +84,7 @@ public static partial class SyntheticWalks
                 return new Knobs
                 {
                     planScale = 0.005f, planTurn = 0.3f, wallOffsets = 3, doorFlips = 1, clutter = 5, people = 2,
-                    glassPass = 0.5f, noise = 0.005f, missingMin = 0.2f, missingMax = 0.3f, bias = 0.01f, noDepth = 0.02f,
+                    glassPass = 0.5f, noise = 0.005f, missingMin = 0.2f, missingMax = 0.3f, bias = 0.01f, noDepth = 0.02f, depthKeep = 1f,
                     driftMin = 0.5f, driftMax = 1f, arScale = 0.02f, jumpsPerMinute = 0.1f, lossesPerMinute = 0.1f,
                     lossMin = 1f, lossMax = 3f, wallMiss = 0.5f, speedMin = 0.8f, speedMax = 1.4f, loweredMin = 0.2f,
                     loweredMax = 0.25f, looking = 0.1f, stopsPerMinute = 0.5f, uTurnChance = 0.05f, wrongTurnChance = 0.05f,
@@ -93,7 +96,7 @@ public static partial class SyntheticWalks
                 {
                     planScale = 0.01f, planTurn = 0.6f, wallOffsets = 6, doorFlips = 2, clutter = 15, tables = true,
                     people = 4, glassPass = 0.6f, noise = 0.01f, missingMin = 0.3f, missingMax = 0.45f, bias = 0.02f,
-                    noDepth = 0.05f, driftMin = 1f, driftMax = 2f, arScale = 0.035f, jumpsPerMinute = 0.4f,
+                    noDepth = 0.05f, depthKeep = 0.5f, driftMin = 1f, driftMax = 2f, arScale = 0.035f, jumpsPerMinute = 0.4f,
                     lossesPerMinute = 0.6f, lossMin = 1f, lossMax = 8f, wallMiss = 0.5f, speedMin = 0.6f, speedMax = 1.6f,
                     loweredMin = 0.2f, loweredMax = 0.4f, looking = 0.2f, stopsPerMinute = 1f, uTurnChance = 0.15f,
                     wrongTurnChance = 0.15f, plateRead = 0.6f, misread = 0.05f, falsePlatesPerMinute = 0.5f,
@@ -104,7 +107,7 @@ public static partial class SyntheticWalks
                 {
                     planScale = 0.015f, planTurn = 1f, wallOffsets = 10, doorFlips = 4, clutter = 30, tables = true,
                     people = 8, glassPass = 0.7f, noise = 0.01f, missingMin = 0.45f, missingMax = 0.6f, bias = 0.03f,
-                    noDepth = 0.15f, driftMin = 2f, driftMax = 3f, arScale = 0.05f, jumpsPerMinute = 1f,
+                    noDepth = 0.15f, depthKeep = 0.25f, driftMin = 2f, driftMax = 3f, arScale = 0.05f, jumpsPerMinute = 1f,
                     lossesPerMinute = 1f, lossMin = 2f, lossMax = 15f, wallMiss = 0.5f, speedMin = 0.6f, speedMax = 1.8f,
                     loweredMin = 0.4f, loweredMax = 0.6f, looking = 0.25f, stopsPerMinute = 1.5f, uTurnChance = 0.25f,
                     wrongTurnChance = 0.25f, plateRead = 0.45f, misread = 0.08f, falsePlatesPerMinute = 1f,
@@ -376,8 +379,9 @@ public static partial class SyntheticWalks
                 .Append(',').Append(F(arPoint.y, 3));
         }
         log.Add(snapLine.ToString());
-        // The route being guided (r,t,k,(x,z)*k): the truth's companion, for scoring guidance near turns.
-        var routeLine = new StringBuilder(Row("r", t, route.Length));
+        // The route being guided (w,t,k,(x,z)*k; r is the phone's own output row): the truth's companion, for scoring
+        // guidance near turns.
+        var routeLine = new StringBuilder(Row("w", t, route.Length));
         foreach (Vector2 p in route)
             routeLine.Append(',').Append(F(p.x, 3)).Append(',').Append(F(p.y, 3));
         log.Add(routeLine.ToString());
@@ -582,6 +586,9 @@ public static partial class SyntheticWalks
     }
 
     public static MismatchKnobs Mismatch = MismatchKnobs.None;
+
+    // A plate in view is read again this often (the phone's reader: every half second or so, the field walk).
+    const double PlateReread = 0.6;
 
     /// <summary>Entrances further apart than this, metres, GPS tells apart before the user is in.</summary>
     public const float ConfusableEntrance = 25f;
@@ -824,7 +831,7 @@ public static partial class SyntheticWalks
             if (hit > 0f && previous > 0f && Mathf.Abs(hit - previous) > 0.8f && random.NextDouble() < 0.3)
                 range = (hit + previous) * 0.5f;
             previous = hit;
-            if (range < 0f || random.NextDouble() < info.depthMissing)
+            if (range < 0f || random.NextDouble() < info.depthMissing || random.NextDouble() >= k.depthKeep)
                 continue;
             range = range * (1f + info.depthBias) + Gaussian(random) * 0.01f * Mismatch.depthNoise * range * range;
             if (range < 0.4f || range > MaxDepth)
@@ -891,7 +898,7 @@ public static partial class SyntheticWalks
             if (Vector2.Dot(-to / range, normal) < 0.707f || !world.Clear(eye, at + normal * 0.3f, t))
                 continue;
             bool measured = random.NextDouble() < 0.5;
-            if (!measured && range > 3f || lastRead.TryGetValue(s, out double last) && t - last < 3.0 ||
+            if (!measured && range > 3f || lastRead.TryGetValue(s, out double last) && t - last < PlateReread ||
                 random.NextDouble() > k.plateRead)
                 continue;
             lastRead[s] = t;

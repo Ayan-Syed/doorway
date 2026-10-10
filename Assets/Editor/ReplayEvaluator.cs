@@ -28,6 +28,9 @@ public static partial class ReplayEvaluator
         public string walk, config, split, checkpoint, state;
         public double time;
         public float error;
+        // Against the door's opening (Opening), not its hallway spot: the user stands in the doorway when they say
+        // they're at a door, and the spot can be metres out into the hallway. And the localizer's Spread then.
+        public float openingError, spread;
     }
 
     public sealed class Summary
@@ -113,17 +116,39 @@ public static partial class ReplayEvaluator
                     if (engine.State == LocalizerState.Outdoors)
                         break;
                     float error = Vector2.Distance(engine.Position, V(c, 3));
-                    stats.errors.Add(error);
+                    float openingError = Vector2.Distance(engine.Position, Opening(plan, walkable, c[2], V(c, 3)));
+                    stats.errors.Add(openingError);
                     results.Add(new CheckpointResult
                     {
                         walk = walk.name, config = engine.Settings.name, split = split, checkpoint = c[2], time = t,
-                        error = error, state = engine.State.ToString(),
+                        error = error, openingError = openingError, spread = engine.Spread, state = engine.State.ToString(),
                     });
                     break;
             }
         }
         stats.relocalizations = engine.Relocalizations;
         return stats;
+    }
+
+    /// <summary>Where a checkpoint's user stands: in the door's opening. The door's plate is on the wall beside it,
+    /// so the opening is the plate's place along the door's way out from its hallway spot (the spot itself if the door
+    /// has no plate, as the entrances).</summary>
+    public static Vector2 Opening(FloorPlan plan, Walkable walkable, string node, Vector2 spot)
+    {
+        if (plan?.places == null || plan.signs == null)
+            return spot;
+        foreach (PlanPlace place in plan.places)
+            foreach (PlanDoor door in place.doors)
+            {
+                if (door.node != node || door.Direction.sqrMagnitude <= 0f)
+                    continue;
+                Vector2 direction = door.Direction.normalized;
+                foreach (PlanSign sign in plan.signs)
+                    if (sign.door == node)
+                        return spot + direction * Mathf.Max(0f, Vector2.Dot(sign.Position - spot, direction));
+                return spot;
+            }
+        return spot;
     }
 
     // Feeds a walk log's input rows to an engine, one line at a time: what the phone did, in the same order.
@@ -254,10 +279,11 @@ public static partial class ReplayEvaluator
     static void Write(string folder, List<CheckpointResult> results, List<Summary> summaries)
     {
         Directory.CreateDirectory(folder);
-        var csv = new StringBuilder("walk,split,config,checkpoint,time,error_m,state\n");
+        var csv = new StringBuilder("walk,split,config,checkpoint,time,error_m,opening_error_m,spread_m,state\n");
         foreach (CheckpointResult r in results)
             csv.Append(r.walk).Append(',').Append(r.split).Append(',').Append(r.config).Append(',').Append(r.checkpoint)
-                .Append(',').Append(S(r.time, 3)).Append(',').Append(S(r.error, 3)).Append(',').Append(r.state).Append('\n');
+                .Append(',').Append(S(r.time, 3)).Append(',').Append(S(r.error, 3)).Append(',').Append(S(r.openingError, 3))
+                .Append(',').Append(S(r.spread, 2)).Append(',').Append(r.state).Append('\n');
         File.WriteAllText(Path.Combine(folder, "results.csv"), csv.ToString());
 
         var summary = new StringBuilder("config,split,walks,checkpoints,median_m,p75_m,p95_m,max_m");

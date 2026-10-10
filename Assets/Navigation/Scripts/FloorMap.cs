@@ -142,7 +142,43 @@ public partial class FloorMap : MonoBehaviour, IPointerDownHandler, IPointerUpHa
         }
     }
 
-    // Builds everything for a floor. Markers aren't pooled: the app loads one plan.
+    // Another floor in place of this one (the same campus: every floor is in the same plan metres): its place map
+    // and walls, then everything SetPlan builds. The basemap's picture is the caller's (it changes with the theme).
+    public void SetFloor(FloorPlan plan, TextAsset places, TextAsset outlines)
+    {
+        if (plan == m_Plan)
+            return;
+        ClearFloor();
+        placeMap = places;
+        if (walls != null)
+            walls.SetWalls(outlines);
+        SetPlan(plan);
+    }
+
+    // Undoes SetPlan: its room numbers, badges and building names go, and the highlight's buffers, which are the
+    // place map's size.
+    void ClearFloor()
+    {
+        foreach (List<Marker> markers in new[] { m_Labels, m_Badges, m_BuildingLabels })
+        {
+            foreach (Marker marker in markers)
+                if (marker.rect != null)
+                    Kill(marker.rect.gameObject);
+            markers.Clear();
+        }
+        ShowRoute(null);
+        Select(null);
+        if (m_HighlightTexture != null)
+            Kill(m_HighlightTexture);
+        m_HighlightTexture = null;
+        m_Mask = m_Blur = null;
+        m_HighlightBytes = null;
+        m_Lit = new RectInt();
+        m_Places = null;
+        m_Plan = null;
+    }
+
+    // Builds everything for a floor (SetFloor clears the last one's first).
     public void SetPlan(FloorPlan plan)
     {
         if (m_Plan == plan)
@@ -327,12 +363,17 @@ public partial class FloorMap : MonoBehaviour, IPointerDownHandler, IPointerUpHa
 
     void OnDestroy()
     {
-        if (m_HighlightTexture == null)
-            return;
+        if (m_HighlightTexture != null)
+            Kill(m_HighlightTexture);
+    }
+
+    // Destroy in play, DestroyImmediate in the editor (the previews and tests).
+    static void Kill(UnityEngine.Object thing)
+    {
         if (Application.isPlaying)
-            Destroy(m_HighlightTexture);
+            Destroy(thing);
         else
-            DestroyImmediate(m_HighlightTexture);
+            DestroyImmediate(thing);
     }
 
     // Turns a plan vector counterclockwise by `degrees` (how the map turns on screen).

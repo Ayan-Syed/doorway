@@ -223,8 +223,8 @@ def problems(floor="ba1-floor1", campus="ucf-campus", grid=True):
             out.append(f"{campus}: over 60000 ground vertices, more than one uGUI mesh holds")
         if info.get("geo") != plan["geo"]:
             out.append(f"{campus} was built with a different geo fit than {floor}.json: run make_data.py --campus")
-        if [b["name"] for b in info["buildings"] if b.get("indoor")] != [plan["building"]]:
-            out.append(f"{campus} doesn't mark {plan['building']} (and only it) as the building with this floor")
+        if plan["building"] not in [b["name"] for b in info["buildings"] if b.get("indoor")]:
+            out.append(f"{campus} doesn't mark {plan['building']} as a building with an indoor map: run make_data.py --campus")
     except (OSError, ValueError, KeyError) as e:
         out.append(f"{campus}: {e}")
     return out

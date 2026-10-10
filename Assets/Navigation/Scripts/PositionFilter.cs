@@ -456,9 +456,10 @@ public sealed class PositionFilter
                 continue;   // dead until the next resample replaces it
             float direction = travel + Gaussian() * rotSigma;
             float length = Mathf.Max(0f, trans + Gaussian() * transSigma);
-            var noisy = new Vector2(Mathf.Sin(direction), Mathf.Cos(direction)) * length;
+            // The noisy move turned onto the plan by this particle's yaw, in one go (one sine and cosine, not two).
+            float planDirection = direction - (BaseYaw + m_Heading[i]) * Mathf.Deg2Rad;
             Vector2 from = m_Position[i];
-            Vector2 to = from + ToPlan(noisy, BaseYaw + m_Heading[i]) * m_Scale[i];
+            Vector2 to = from + new Vector2(Mathf.Sin(planDirection), Mathf.Cos(planDirection)) * (length * m_Scale[i]);
             if (m_Walkable != null && !m_Walkable.SegmentClear(from, to))
             {
                 m_Weight[i] = 0f;
@@ -541,6 +542,7 @@ public sealed class PositionFilter
     // that would land in a wall stays put: nobody walked, so nothing is learnt from it.
     public void Diffuse(float positionSpread, float headingSpread)
     {
+        m_Version++;
         for (int i = 0; i < m_Count; i++)
         {
             if (m_Weight[i] <= 0f)
@@ -638,6 +640,7 @@ public sealed class PositionFilter
     // it to nothing.
     void Roughen()
     {
+        m_Version++;
         float heading = Mathf.Clamp(HeadingSpread * RoughenShare, MinUpdateRoughen, MaxUpdateRoughen);
         for (int i = 0; i < m_Count; i++)
         {
@@ -708,6 +711,57 @@ public sealed class PositionFilter
     /// <summary>The radius round the estimate holding this share of the weight, metres: 0.68 is what the map's halo
     /// draws. A cloud strung out along a hallway reads as wide, as it should.</summary>
     public float Radius(float share)
+    {
+        // The same cloud asked again (every frame, several shares): from the cache.
+        for (int c = 0; c < m_RadiusCache.Length; c++)
+            if (m_RadiusCache[c].version == m_Version && m_RadiusCache[c].share == share)
+                return m_RadiusCache[c].radius;
+        float radius = ComputeRadius(share);
+        m_RadiusCache[m_RadiusNext] = (m_Version, share, radius);
+        m_RadiusNext = (m_RadiusNext + 1) % m_RadiusCache.Length;
+        return radius;
+    }
+
+    // Changes whenever the particles or the estimate do (for the radius cache).
+    long m_Version = 1;
+    readonly (long version, float share, float radius)[] m_RadiusCache = new (long, float, float)[4];
+    int m_RadiusNext;
+
+    float ComputeRadius(float share)
+    {
+        // A histogram of distances (RadiusBin wide, out to RadiusBins of them) rather than a sort: the localizer asks
+        // this several times a frame, and sorting 2000 particles each time was the costliest thing on the phone.
+        Array.Clear(m_RadiusWeights, 0, m_RadiusWeights.Length);
+        float total = 0f, beyond = 0f;
+        for (int i = 0; i < m_Count; i++)
+        {
+            float w = m_Weight[i];
+            if (w <= 0f)
+                continue;
+            total += w;
+            int bin = (int)(Mathf.Sqrt((m_Position[i] - Estimate).sqrMagnitude) / RadiusBin);
+            if (bin < RadiusBins)
+                m_RadiusWeights[bin] += w;
+            else
+                beyond += w;
+        }
+        if (!(total > 0f))
+            return 0f;
+        float target = share * total, sum = 0f;
+        for (int b = 0; b < RadiusBins; b++)
+        {
+            sum += m_RadiusWeights[b];
+            if (sum >= target)
+                return (b + 1) * RadiusBin;
+        }
+        return SortedRadius(share);   // the share reaches past the histogram (a wide cloud): exactly
+    }
+
+    const float RadiusBin = 0.02f;
+    const int RadiusBins = 500;
+    readonly float[] m_RadiusWeights = new float[RadiusBins];
+
+    float SortedRadius(float share)
     {
         int n = 0;
         for (int i = 0; i < m_Count; i++)
@@ -1052,6 +1106,7 @@ public sealed class PositionFilter
 
     void Uniform()
     {
+        m_Version++;
         float w = 1f / m_Count;
         for (int i = 0; i < m_Count; i++)
             m_Weight[i] = w;
@@ -1059,6 +1114,7 @@ public sealed class PositionFilter
 
     void Normalize(float total)
     {
+        m_Version++;
         for (int i = 0; i < m_Count; i++)
             m_Weight[i] /= total;
     }
@@ -1077,6 +1133,7 @@ public sealed class PositionFilter
     // covers; Augmented MCL then swaps InjectionShare of the picks for random particles.
     void Resample()
     {
+        m_Version++;
         int n = Adaptive ? KldCount() : m_Count;
         float total = 0f;
         for (int i = 0; i < m_Count; i++)
@@ -1152,6 +1209,7 @@ public sealed class PositionFilter
 
     void UpdateEstimate()
     {
+        m_Version++;
         float total = 0f, scale = 0f, scale2 = 0f, sin = 0f, cos = 0f;
         Vector2 mean = Vector2.zero;
         for (int i = 0; i < m_Count; i++)

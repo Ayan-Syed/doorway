@@ -30,6 +30,11 @@ public partial class FloorMap
         m_Campus = CampusData.Load(campusGeometry, campusInfo);
         if (m_Campus == null)
             return;
+        // The loaded floor's building is "the" indoor one: it sinks away as the floor comes in. Others with a map
+        // keep their roofs, and a tap on one switches floors.
+        CampusData.Building own = Array.Find(m_Campus.buildings, b => b.indoor && b.name == m_Plan?.building);
+        if (own != null)
+            m_Campus.indoor = own;
         if (campusGround != null)
             campusGround.SetCampus(m_Campus, pixelsPerMeter);
         foreach (CampusBuildings buildings in campusBuildings)
@@ -44,7 +49,7 @@ public partial class FloorMap
             if (Drawable(building.name))
                 m_BuildingLabels.Add(new Marker { position = building.Spot, area = building.area, building = building });
         // The floor's building first, then the biggest: labels claim their space first come, first served.
-        m_BuildingLabels = m_BuildingLabels.OrderBy(m => m.building.indoor ? 0 : 1).ThenByDescending(m => m.area).ToList();
+        m_BuildingLabels = m_BuildingLabels.OrderBy(m => m.building == m_Campus.indoor ? 0 : 1).ThenByDescending(m => m.area).ToList();
     }
 
     // Names the map's font can draw: Latin ones (not the fraternity houses' Greek letters).
@@ -97,7 +102,7 @@ public partial class FloorMap
     void StyleBuildingLabel(Marker label)
     {
         ThemeColors.CopyColors(buildingLabelTemplate, label.rect);
-        if (label.building.indoor)
+        if (label.building == m_Campus.indoor)
             label.rect.GetComponent<Text>().color = Theme.Current.primary;
     }
 
