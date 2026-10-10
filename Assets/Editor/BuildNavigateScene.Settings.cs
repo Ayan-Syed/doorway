@@ -2,10 +2,10 @@ using UnityEngine;
 using UnityEngine.UI;
 using static UIBuild;
 
-// Settings, the snackbar and the launch screen.
+// Settings, the mic button, the snackbar and the launch screen.
 public static partial class BuildNavigateScene
 {
-    // A sheet over the dimmed map: your marker, light or dark, the 3D map.
+    // A sheet over the dimmed map: your marker, light or dark, the 3D map, pretending, spoken directions.
     static void CreateSettings(NavigationScreen screen, RectTransform safeArea)
     {
         CanvasGroup panelGroup = Panel("Settings", safeArea);
@@ -95,9 +95,12 @@ public static partial class BuildNavigateScene
             s_Regular, 32, s_T.onSurfaceVariant, TextAnchor.MiddleLeft);
         BestFit(screen.leftBuildingDetail, 24);
 
+        screen.voiceToggle = SwitchRow(sheet, "Voice", 1392f, "Spoken directions",
+            "Read turns aloud and answer when you talk", out _, out _, out screen.voiceTrack, out screen.voiceKnob);
+
         // Where the maps come from, as their licences ask: under everything else, in the small grey of the
-        // settings' detail lines. It ends at 1472, inside the open sheet (1480 high).
-        Text credits = TextIn(TopBand("Credits", sheet, 1400f, 72f, 48f, 48f),
+        // settings' detail lines. It ends at 1592, inside the open sheet (1600 high).
+        Text credits = TextIn(TopBand("Credits", sheet, 1520f, 72f, 48f, 48f),
             "Floor plan: Knight Hacks forge (MIT) · Map data © OpenStreetMap contributors",
             s_Regular, 32, s_T.onSurfaceVariant, TextAnchor.MiddleLeft);
         BestFit(credits, 22);
@@ -115,6 +118,21 @@ public static partial class BuildNavigateScene
         screen.snackbarText = TextIn(Stretch("Text", snack, 40f, 40f), "", s_Regular, 38, s_T.onInverseSurface,
             TextAnchor.MiddleLeft);
         BestFit(screen.snackbarText, 28);
+    }
+
+    // Talk to the app: a round button at the lower left, which NavigationScreen keeps just above the sheet or card
+    // under it. The ring behind it swells with the voice while listening; only its edge shows past the button.
+    static void CreateMic(NavigationScreen screen, RectTransform safeArea)
+    {
+        RectTransform mic = Fixed("Mic", safeArea, Vector2.zero, new Vector2(32f, 300f), new Vector2(112f, 112f));
+        mic.pivot = Vector2.zero;
+        RectTransform ring = Fixed("Ring", mic, Center, Vector2.zero, new Vector2(112f, 112f));
+        Rounded(ring, Alpha(s_T.primary, 0.28f), 56f);
+        screen.micRing = ring;
+        CardButton(mic, s_T.surface, 56f, true, out Image surface);
+        screen.micBackground = surface;
+        screen.micIcon = TextIn(Stretch("Icon", mic), IconMic, s_Icons, 56, s_T.primary, TextAnchor.MiddleCenter);
+        screen.micButton = mic.GetComponent<CanvasGroup>();
     }
 
     // While the app opens: the logo, the name and a spinner on the theme's surface, over everything. A canvas of
