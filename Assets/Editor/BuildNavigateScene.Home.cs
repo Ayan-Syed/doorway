@@ -18,7 +18,7 @@ public static partial class BuildNavigateScene
         // placeholder; NavigationScreen writes the plan's floor.
         RectTransform floor = Fixed("Floor", panel, Vector2.one, new Vector2(-32f, -300f), new Vector2(0f, 84f));
         floor.pivot = Vector2.one;
-        CardButton(floor, s_T.surface, 42f, true, out _);
+        CardButton(floor, s_T.surface, SmallCorner, true, out _);
         HorizontalRow(floor, 4f, TextAnchor.MiddleCenter).padding = new RectOffset(36, 22, 0, 0);
         FitWidth(floor);
         LayoutText(floor, "Floor 1", s_SemiBold, 36, s_T.onSurface);
@@ -48,7 +48,7 @@ public static partial class BuildNavigateScene
         {
             RectTransform chip = Child(ChipNames[i], row);
             Size(chip, 0f, 84f);
-            screen.chips[i] = CardButton(chip, s_T.surface, 42f, true, out Image chipSurface);
+            screen.chips[i] = CardButton(chip, s_T.surface, SmallCorner, true, out Image chipSurface);
             screen.chipBackgrounds[i] = chipSurface;
             HorizontalRow(chip, 0f, TextAnchor.MiddleCenter).padding = new RectOffset(36, 36, 0, 0);
             screen.chipLabels[i] = LayoutText(chip, ChipNames[i], s_SemiBold, 36, s_T.onSurface);
@@ -77,7 +77,7 @@ public static partial class BuildNavigateScene
         // Into the building (Go inside) or back to the whole floor, riding on the sheet's top edge at the right.
         RectTransform whole = Fixed("Whole Floor", sheet, Vector2.one, new Vector2(-32f, 24f), new Vector2(0f, 84f));
         whole.pivot = new Vector2(1f, 0f);
-        CardButton(whole, s_T.surface, 42f, true, out _);
+        CardButton(whole, s_T.surface, SmallCorner, true, out _);
         HorizontalRow(whole, 10f, TextAnchor.MiddleCenter).padding = new RectOffset(28, 36, 0, 0);
         FitWidth(whole);
         screen.wholeFloorIcon = LayoutText(whole, IconWholeFloor, s_Icons, 44, s_T.primary);
@@ -87,7 +87,7 @@ public static partial class BuildNavigateScene
         // My location, above it, where a map app has it.
         RectTransform locate = Fixed("Locate", sheet, Vector2.one, new Vector2(-32f, 132f), new Vector2(112f, 112f));
         locate.pivot = new Vector2(1f, 0f);
-        CardButton(locate, s_T.surface, 56f, true, out _);
+        CardButton(locate, s_T.surface, Corner, true, out _);
         TextIn(Stretch("Icon", locate), IconMyLocation, s_Icons, 52, s_T.primary, TextAnchor.MiddleCenter);
         screen.locate = locate.GetComponent<CanvasGroup>();
 
@@ -111,7 +111,7 @@ public static partial class BuildNavigateScene
     static void CreateRoomSearch(NavigationScreen screen, RectTransform sheet)
     {
         RectTransform box = TopBand("Room Search", sheet, 188f, 92f, 48f, 48f);
-        Rounded(box, s_T.surfaceVariant, 46f).raycastTarget = true;
+        Rounded(box, s_T.surfaceVariant, SmallCorner).raycastTarget = true;
         screen.roomSearch = box.gameObject.AddComponent<CanvasGroup>();
         TextIn(Fixed("Icon", box, new Vector2(0f, 0.5f), new Vector2(52f, 0f), new Vector2(60f, 60f)), IconSearch,
             s_Icons, 44, s_T.onSurfaceVariant, TextAnchor.MiddleCenter);
@@ -153,7 +153,7 @@ public static partial class BuildNavigateScene
     static void CreateSearch(NavigationScreen screen, RectTransform panel)
     {
         RectTransform search = TopBand("Search", panel, 24f, 132f, 32f, 32f);
-        Card(search, s_T.surface, 66f, true).raycastTarget = true;
+        Card(search, s_T.surface, Corner, true).raycastTarget = true;
         screen.searchCard = search;
 
         // Search, or back while searching (NavigationScreen swaps the glyph).

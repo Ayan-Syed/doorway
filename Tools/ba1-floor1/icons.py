@@ -18,6 +18,10 @@ ICONS = {
               "arrow": (191, 64, 34), "light": (251, 248, 241)},
     "knight": {"top": (48, 47, 44), "bottom": (10, 10, 10), "door": (255, 201, 4),
                "arrow": (22, 22, 21), "light": (255, 201, 4)},
+    "iris": {"top": (98, 104, 158), "bottom": (66, 72, 116), "door": (220, 214, 247),
+             "arrow": (66, 72, 116), "light": (220, 214, 247)},
+    "dusk": {"top": (52, 56, 100), "bottom": (24, 26, 50), "door": (166, 177, 225),
+             "arrow": (24, 26, 50), "light": (166, 177, 225)},
 }
 S = 4                 # drawn this many times bigger, then shrunk, for smooth edges
 SQUIRCLE = 5          # the tile's superellipse power: between a rounded square and a circle

@@ -35,8 +35,8 @@ public static partial class BuildNavigateScene
     const string EmojiFolder = UIFolder + "/Emoji";
     const string MeshFolder = "Assets/Navigation/Meshes";
     const string ProductName = "Doorway";
-    const string DefaultTheme = "campus";
-    const string NightTheme = "knight";
+    const string DefaultTheme = "iris";
+    const string NightTheme = "dusk";
 
     // Unity's built-in "UI" layer. Only the UI camera draws it.
     const int UILayer = 5;
@@ -115,7 +115,7 @@ public static partial class BuildNavigateScene
         }
     }
 
-    // -theme <name> on the command line picks the day theme; campus without it. The night theme is always knight.
+    // -theme <name> on the command line picks the day theme; iris without it. The night theme is always dusk.
     static string ThemeArgument()
     {
         string[] args = Environment.GetCommandLineArgs();
@@ -157,10 +157,7 @@ public static partial class BuildNavigateScene
         if (!LoadStyle())
             return false;
 
-        // Google Sans in place of Inter: rounder, the map-app look.
-        s_Regular = LoadFont("GoogleSans-400.ttf", s_Regular);
-        s_SemiBold = LoadFont("GoogleSans-500.ttf", s_SemiBold);
-        s_Bold = LoadFont("GoogleSans-700.ttf", s_Bold);
+        // Inter, from LoadStyle. Google Sans (GoogleSans-*.ttf, still in Fonts) gave the old map-app look.
 
         var planJson = AssetDatabase.LoadAssetAtPath<TextAsset>(PlanJsonPath);
         s_PlaceMap = AssetDatabase.LoadAssetAtPath<TextAsset>(PlaceMapPath);

@@ -32,6 +32,15 @@ THEMES = {
                "teaching": (50, 45, 33), "restroom": (30, 36, 45), "stairs": (42, 36, 47),
                "elevator": (42, 36, 47), "wall": (16, 16, 16), "outline": (92, 88, 80),
                "detail": (84, 80, 74)},
+    # Iris and dusk: the 424874 / DCD6F7 / A6B1E1 / CACFD6 / D6E5E3 palette, by day and by night.
+    "iris": {"ground": (214, 229, 227), "shadow": 0.12, "walkway": (255, 255, 255), "room": (238, 240, 246),
+             "teaching": (228, 223, 249), "restroom": (221, 235, 233), "stairs": (226, 230, 246),
+             "elevator": (226, 230, 246), "wall": (190, 195, 210), "outline": (108, 113, 150),
+             "detail": (168, 173, 192)},
+    "dusk": {"ground": (21, 23, 44), "shadow": 0.0, "walkway": (54, 58, 96), "room": (36, 39, 70),
+             "teaching": (54, 49, 92), "restroom": (33, 52, 62), "stairs": (45, 48, 86),
+             "elevator": (45, 48, 86), "wall": (21, 23, 44), "outline": (112, 118, 172),
+             "detail": (88, 94, 140)},
 }
 KINDS = ["outside", "walkway", "room", "teaching", "restroom", "stairs", "elevator"]
 WALL_WIDTH, OUTLINE_WIDTH = 4.5, 9.0     # plan pixels (3000 across): 15 cm and 31 cm

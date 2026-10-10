@@ -15,7 +15,7 @@ public static partial class BuildNavigateScene
         rect.pivot = new Vector2(0.5f, 1f);
         rect.sizeDelta = new Vector2(0f, 1000f);   // a starting value: BottomSheet sizes it to its stops
         rect.anchoredPosition = new Vector2(0f, 300f);
-        Card(rect, s_T.surface, 56f, true).raycastTarget = true;   // so drags on empty parts reach the sheet
+        Card(rect, s_T.surface, SheetCorner, true).raycastTarget = true;   // so drags on empty parts reach the sheet
         Rounded(Fixed("Handle", rect, new Vector2(0.5f, 1f), new Vector2(0f, -22f), new Vector2(84f, 10f)), s_T.outline, 5f);
         var sheet = rect.gameObject.AddComponent<BottomSheet>();
         // extra taller than the highest stop, so an overshoot never shows a gap underneath. The list below ends
