@@ -41,10 +41,19 @@ import sys
 
 import pandas as pd
 
+import importlib
+
 here = os.getcwd()   # the notebook's folder, in a Git folder
-sys.path[:0] = [here, os.path.normpath(os.path.join(here, "..", "eval"))]
+for folder in (here, os.path.normpath(os.path.join(here, "..", "eval"))):
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
 import doorway_logs as dl  # noqa: E402
 import report  # noqa: E402
+
+# A session keeps modules it has imported: after a pull, Run all would use the old code without these.
+dl = importlib.reload(dl)
+report = importlib.reload(report)
+print(f"doorway_logs from {dl.__file__}")
 
 logs, skipped = [], []
 for path in sorted(glob.glob(f"{root}/walks/**/*.csv", recursive=True)):
