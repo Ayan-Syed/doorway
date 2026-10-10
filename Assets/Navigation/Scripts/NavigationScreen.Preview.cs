@@ -38,6 +38,20 @@ public partial class NavigationScreen
         }
     }
 
+    // Zooming in from the campus to the floor's building, span metres across it: its roof sinking away and the
+    // floor coming in.
+    public void PreviewApproach(float span)
+    {
+        PreviewCampus(false);
+        CampusData.Building building = map.Campus?.indoor;
+        if (building == null)
+            return;
+        HomeInsets(homeSheet.Stop);
+        map.FramePoints(new[] { building.bounds.center }, 0f, span, true);
+        UpdateIndoors(true);
+        UpdateHomeChrome();
+    }
+
     // A campus building tapped, by its exact name.
     public void PreviewBuilding(string name)
     {

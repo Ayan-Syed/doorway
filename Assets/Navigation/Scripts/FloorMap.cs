@@ -203,6 +203,7 @@ public partial class FloorMap : MonoBehaviour, IPointerDownHandler, IPointerUpHa
             marker.area = label.area;
             marker.place = place;
             m_Labels.Add(marker);
+            copy.gameObject.SetActive(false);   // until Fade shows it
         }
         // Claim priority: biggest rooms first.
         m_Labels = m_Labels.OrderByDescending(m => m.area).ToList();
@@ -228,6 +229,7 @@ public partial class FloorMap : MonoBehaviour, IPointerDownHandler, IPointerUpHa
                 marker.size = copy.sizeDelta;
                 marker.place = place;
                 m_Badges.Add(marker);
+                copy.gameObject.SetActive(false);   // until Fade shows it
             }
         }
     }
@@ -308,9 +310,9 @@ public partial class FloorMap : MonoBehaviour, IPointerDownHandler, IPointerUpHa
     void LateUpdate()
     {
         float step = Time.unscaledDeltaTime * 7f;
-        Fade(m_Labels, step, false);
-        Fade(m_Badges, step, false);
-        Fade(m_BuildingLabels, step, true);
+        Fade(m_Labels, step);
+        Fade(m_Badges, step);
+        Fade(m_BuildingLabels, step);
     }
 
     void OnDestroy()

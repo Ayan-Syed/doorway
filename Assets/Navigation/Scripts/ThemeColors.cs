@@ -52,8 +52,18 @@ public class ThemeColors : MonoBehaviour
     public List<FieldColor> fields = new List<FieldColor>();
     public List<WallColor> walls = new List<WallColor>();
 
+    // CopyColors' template, its parts kept for the rest of a restyle: every row or label made from one template is
+    // recoloured in a row, so the template's parts are found once, not once per copy. The copy's go in buffers.
+    static Component s_Template;
+    static Graphic[] s_TemplateGraphics;
+    static TextHalo[] s_TemplateHalos;
+    static readonly List<Graphic> s_Graphics = new List<Graphic>();
+    static readonly List<TextHalo> s_Halos = new List<TextHalo>();
+
     public void Apply(bool night)
     {
+        s_Template = null;   // a new restyle: look at the templates afresh
+
         foreach (GraphicColor g in graphics)
             if (g.graphic != null)
                 g.graphic.color = night ? g.night : g.day;
@@ -85,15 +95,35 @@ public class ThemeColors : MonoBehaviour
     {
         if (template == null || copy == null)
             return;
+        if (template != s_Template)
+        {
+            s_Template = template;
+            s_TemplateGraphics = template.GetComponentsInChildren<Graphic>(true);
+            s_TemplateHalos = template.GetComponentsInChildren<TextHalo>(true);
+        }
 
-        Graphic[] from = template.GetComponentsInChildren<Graphic>(true);
-        Graphic[] to = copy.GetComponentsInChildren<Graphic>(true);
-        for (int i = 0; i < from.Length && i < to.Length; i++)
-            to[i].color = from[i].color;
+        copy.GetComponentsInChildren(true, s_Graphics);
+        for (int i = 0; i < s_TemplateGraphics.Length && i < s_Graphics.Count; i++)
+            s_Graphics[i].color = s_TemplateGraphics[i].color;
 
-        TextHalo[] haloFrom = template.GetComponentsInChildren<TextHalo>(true);
-        TextHalo[] haloTo = copy.GetComponentsInChildren<TextHalo>(true);
-        for (int i = 0; i < haloFrom.Length && i < haloTo.Length; i++)
-            haloTo[i].SetColor(haloFrom[i].color);
+        copy.GetComponentsInChildren(true, s_Halos);
+        for (int i = 0; i < s_TemplateHalos.Length && i < s_Halos.Count; i++)
+            s_Halos[i].SetColor(s_TemplateHalos[i].color);
+        s_Graphics.Clear();
+        s_Halos.Clear();
+    }
+
+    // Stops switching an image's picture between day and night, and says which pictures it had (the launch logo,
+    // once the app has opened, so they can leave memory).
+    public void Forget(RawImage image, List<Texture> pictures)
+    {
+        for (int i = textures.Count - 1; i >= 0; i--)
+        {
+            if (textures[i].image != image)
+                continue;
+            pictures.Add(textures[i].day);
+            pictures.Add(textures[i].night);
+            textures.RemoveAt(i);
+        }
     }
 }

@@ -5,9 +5,20 @@ using UnityEngine;
 // can; otherwise the user picks one in the list or taps the map.
 public partial class NavigationScreen
 {
+    // The start list as last built: for which destination, and which doors were "Near you" (and from where). The
+    // same again is kept as it is, so going back and forth between Start and Align, or Re-align, rebuilds nothing.
+    PlanPlace m_StartListFor;
+    readonly List<PlanDoor> m_StartListNear = new List<PlanDoor>();
+    readonly List<(PlanPlace place, PlanDoor door)> m_NearYou = new List<(PlanPlace place, PlanDoor door)>();
+    Vector2 m_NearYouAt;
+
     // The blue dot while browsing. Off once the start is picked: from Align on, the map's dot is the start.
+    // Show calls this on every step change, so it also rests the GPS while walking and on the arrived card, where
+    // nothing uses it (and wakes it after).
     void UpdateGpsPuck()
     {
+        if (location != null && Application.isPlaying)
+            location.Suspend(m_Step == Step.Guide || m_Step == Step.Arrived);
         if (m_Step > Step.Start)
             return;
         if (location != null && location.HasFix && OnMap(location.Position))
@@ -16,10 +27,11 @@ public partial class NavigationScreen
             map.HidePuck();
     }
 
-    // The accuracy as the map draws it, and the Align step says it.
+    // The accuracy as the map draws it, and the Align step says it: up to the worst fix that may pick a start door,
+    // so a fix that's allowed to pick never claims to be better than it is.
     float ShownAccuracy()
     {
-        return Mathf.Clamp(location.Accuracy, MinAccuracyShown, MaxAccuracyShown);
+        return Mathf.Clamp(location.Accuracy, MinAccuracyShown, MaxStartAccuracy);
     }
 
     // A new fix, the fix lost, or location turned off or on.
@@ -35,11 +47,12 @@ public partial class NavigationScreen
             originText.text = OriginNear();   // the "±" follows the fix, like the disc
     }
 
-    // Outside the floor's building, by more than a fix in it is often off by.
-    bool Outside(Vector2 at)
+    // Outside the floor's building: further out than the fix may be off by (and never less than OutsideMargin).
+    // A ±30 m fix landing 10 m outside the outline is as likely inside near that wall.
+    bool Outside(Vector2 at, float accuracy)
     {
         CampusData.Building building = map.Campus?.indoor;
-        return building != null && !building.Contains(at) && building.Distance(at) > OutsideMargin;
+        return building != null && !building.Contains(at) && building.Distance(at) > Mathf.Max(OutsideMargin, accuracy);
     }
 
     // Every door but the destination's, nearest first. A new list each time: callers may call it again (through
@@ -78,30 +91,72 @@ public partial class NavigationScreen
             m_AutoStart = true;
             m_FindingSince = Time.unscaledTime;
             m_ToldWhy = false;
-            if (TryAutoStart())
-                return;
         }
+        // AR starts with this step, and ARCore asks for the camera as it does: not while the location dialog is up
+        // (Android shows one at a time and refuses the other unseen).
+        if (Application.isPlaying && location != null)
+            navigator.HoldAR = location.IsAsking;
+        if (m_AutoStart && TryAutoStart())
+            return;
 
         originField.gameObject.SetActive(true);
         originButton.gameObject.SetActive(false);
-        startList.Clear();
+        FillStartList(destination);
+
+        Show(Step.Start);
+        OpenSheet(startSheet, 1);
+        map.ShowRoute(null);
+        SetInsets(BottomOf(routeCard) + 8f, startSheet.stops[1]);
+        map.ShowAll(!Application.isPlaying);
+        UpdateFinding();
+        if (!m_AutoStart && location != null && location.Unavailable && !m_ToldNoLocation && Application.isPlaying)
+        {
+            m_ToldNoLocation = true;
+            Snack("Location is off · pick where you are");
+        }
+    }
+
+    // "Near you" (the doors round the phone's location), then every door by kind. Built again only when the
+    // destination or the doors near you have changed since last time.
+    void FillStartList(PlanPlace destination)
+    {
+        m_NearYou.Clear();
         if (location != null && location.HasFix)
         {
             Vector2 at = location.Position;
-            bool outside = Outside(at);
-            int rows = 0;
+            m_NearYouAt = at;
+            bool outside = Outside(at, location.Accuracy);
             foreach (var (place, door, distance) in DoorsNear(at))
             {
-                if (distance > MaxGpsDistance || rows == NearYouRows)
+                if (distance > MaxGpsDistance || m_NearYou.Count == NearYouRows)
                     break;
                 if (outside && place.kind != "exit")
                     continue;
-                if (rows++ == 0)
-                    startList.AddSection("Near you");
-                // The phone's location goes along, so "Not here?" offers the doors around it.
-                startList.AddRow(place.kind, PlaceStyle.DoorTitle(place, door), place.detail,
-                    () => ShowAlign(place, door, false, at));
+                m_NearYou.Add((place, door));
             }
+        }
+
+        bool same = destination == m_StartListFor && m_NearYou.Count == m_StartListNear.Count;
+        for (int i = 0; same && i < m_NearYou.Count; i++)
+            same = m_NearYou[i].door == m_StartListNear[i];
+        if (same)
+        {
+            startList.ResetSearch();
+            return;
+        }
+        m_StartListFor = destination;
+        m_StartListNear.Clear();
+
+        startList.Clear();
+        for (int i = 0; i < m_NearYou.Count; i++)
+        {
+            var (place, door) = m_NearYou[i];
+            m_StartListNear.Add(door);
+            if (i == 0)
+                startList.AddSection("Near you");
+            // The phone's location goes along (as it is when tapped), so "Not here?" offers the doors around it.
+            startList.AddRow(place.kind, PlaceStyle.DoorTitle(place, door), place.detail,
+                () => ShowAlign(place, door, false, m_NearYouAt));
         }
         foreach (var (title, kinds) in Sections)
         {
@@ -123,18 +178,6 @@ public partial class NavigationScreen
             }
         }
         startList.ResetSearch();
-
-        Show(Step.Start);
-        OpenSheet(startSheet, 1);
-        map.ShowRoute(null);
-        SetInsets(BottomOf(routeCard) + 8f, startSheet.stops[1]);
-        map.ShowAll(!Application.isPlaying);
-        UpdateFinding();
-        if (!m_AutoStart && location != null && location.Unavailable && !m_ToldNoLocation && Application.isPlaying)
-        {
-            m_ToldNoLocation = true;
-            Snack("Location is off · pick where you are");
-        }
     }
 
     // The door nearest the phone's location, or the nearest entrance if it's outside, once the location is good
@@ -144,7 +187,7 @@ public partial class NavigationScreen
         if (location == null || !location.HasFix || location.Accuracy > MaxStartAccuracy)
             return false;
         Vector2 at = location.Position;
-        bool outside = Outside(at);
+        bool outside = Outside(at, location.Accuracy);
         foreach (var (place, door, distance) in DoorsNear(at))
         {
             if (distance > MaxGpsDistance)
@@ -167,6 +210,8 @@ public partial class NavigationScreen
     // soon as there's no hope, a word on why it didn't pick (once), over the list to pick from.
     void UpdateFinding()
     {
+        if (Application.isPlaying && location != null)
+            navigator.HoldAR = location.IsAsking;   // AR waits for the location dialog's answer (ShowStart)
         bool usable = location != null && location.HasFix && location.Accuracy <= MaxStartAccuracy;
         bool finding = m_AutoStart && !usable && location != null && !location.Unavailable &&
                        (!Application.isPlaying || Time.unscaledTime - m_FindingSince < FindingSeconds);

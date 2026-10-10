@@ -155,10 +155,15 @@ public static partial class BuildNavigateScene
         TextIn(Stretch("Icon", settings), IconSettings, s_Icons, 52, s_T.onSurfaceVariant, TextAnchor.MiddleCenter);
     }
 
-    // The building's floors, dropped down from the floor button, the one shown ticked. Only floor 1 is mapped.
-    // A tap anywhere else closes it. The header and "Floor 1" are placeholders NavigationScreen fills from the plan.
+    // The building's floors, dropped down from the floor button, the plan's floor ticked: the only one mapped.
+    // A tap anywhere else closes it. The header is the plan's building (NavigationScreen writes it again).
     static void CreateFloorMenu(NavigationScreen screen, RectTransform panel)
     {
+        FloorPlan plan = FloorPlan.Load(screen.navigator.planJson);
+        int mapped = NavigationScreen.FloorNumber(plan.floor);
+        // BA1's floors (FloorPlans/ has all four), or as many as the plan's floor needs.
+        int floors = Mathf.Max(BuildingFloors, mapped);
+
         CanvasGroup menu = Panel("Floor Menu", panel);
         screen.floorMenu = menu;
         RectTransform blocker = Stretch("Blocker", menu.transform);
@@ -168,26 +173,27 @@ public static partial class BuildNavigateScene
         blockerButton.navigation = new Navigation { mode = Navigation.Mode.None };
         screen.floorMenuBlocker = blockerButton;
 
-        // 512 = an 84 px header, four 104 px rows and 12 below.
-        RectTransform card = Fixed("Card", menu.transform, Vector2.one, new Vector2(-32f, -300f), new Vector2(480f, 512f));
+        // An 84 px header, a 104 px row a floor (the top floor first) and 12 below: 512 for four.
+        RectTransform card = Fixed("Card", menu.transform, Vector2.one, new Vector2(-32f, -300f),
+            new Vector2(480f, 84f + floors * 104f + 12f));
         card.pivot = Vector2.one;
         Card(card, s_T.surface, 36f, true).raycastTarget = true;
-        Text building = TextIn(TopBand("Building", card, 20f, 56f, 40f, 32f), "Business Administration I", s_Regular, 30,
+        Text building = TextIn(TopBand("Building", card, 20f, 56f, 40f, 32f), plan.building, s_Regular, 30,
             s_T.onSurfaceVariant, TextAnchor.MiddleLeft);
         BestFit(building, 24);
 
-        screen.floorButtons = new Button[4];
-        for (int n = 4; n >= 1; n--)
+        screen.floorButtons = new Button[floors];
+        for (int n = floors; n >= 1; n--)
         {
-            RectTransform row = TopBand($"Floor {n}", card, 84f + (4 - n) * 104f, 104f, 12f, 12f);
-            if (n == 1)
+            RectTransform row = TopBand($"Floor {n}", card, 84f + (floors - n) * 104f, 104f, 12f, 12f);
+            if (n == mapped)
             {
                 Button shown = MakeButton(row, s_T.primaryContainer, 26f, out _);
                 shown.GetComponent<PressFeedback>().pressedScale = 0.98f;
-                TextIn(Stretch("Label", row, 28f, 100f), "Floor 1", s_SemiBold, 38, s_T.primary, TextAnchor.MiddleLeft);
+                TextIn(Stretch("Label", row, 28f, 100f), plan.floor, s_SemiBold, 38, s_T.primary, TextAnchor.MiddleLeft);
                 TextIn(Fixed("Icon", row, new Vector2(1f, 0.5f), new Vector2(-56f, 0f), new Vector2(64f, 64f)),
                     IconDone, s_Icons, 48, s_T.primary, TextAnchor.MiddleCenter);
-                screen.floorButtons[0] = shown;
+                screen.floorButtons[n - 1] = shown;
             }
             else
             {
@@ -197,4 +203,7 @@ public static partial class BuildNavigateScene
             }
         }
     }
+
+    // How many floors the floor menu lists: BA1 has four.
+    const int BuildingFloors = 4;
 }

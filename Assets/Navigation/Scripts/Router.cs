@@ -1,16 +1,21 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-// Shortest walking routes over a floor plan's walkway graph (Dijkstra; a floor has well under 100 points).
+// Shortest walking routes over a floor plan's walkway graph (Dijkstra; a floor has a hundred-odd points).
 public class Router
 {
     readonly FloorPlan m_Plan;
     readonly Vector2[] m_Positions;
     readonly List<int>[] m_Links;
 
-    public Router(FloorPlan plan)
+    // Where people can walk (Data/*-walkable.bytes). With it, a route from an arbitrary spot joins the graph only
+    // along a line that crosses no wall; without it, at the nearest link as the crow flies.
+    public Walkable Walkable { get; set; }
+
+    public Router(FloorPlan plan, Walkable walkable = null)
     {
         m_Plan = plan;
+        Walkable = walkable;
         int count = plan.nodes.Count;
         m_Positions = new Vector2[count];
         m_Links = new List<int>[count];
@@ -39,25 +44,13 @@ public class Router
         return Search(cost, null, to);
     }
 
-    // From anywhere on the floor (after walking off the route): joins the graph at the nearest spot on a link.
+    // From anywhere on the floor (after walking off the route): joins the graph at the nearest spot on a link that
+    // can be walked to in a straight line (see Walkable), or at the nearest spot of all if none can.
     public Route FindRoute(Vector2 from, PlanPlace to)
     {
-        float best = float.PositiveInfinity;
-        int bestA = 0, bestB = 0;
-        Vector2 join = from;
-        foreach (PlanEdge edge in m_Plan.edges)
-        {
-            int a = m_Plan.NodeIndex(edge.a), b = m_Plan.NodeIndex(edge.b);
-            Vector2 q = ClosestOnSegment(from, m_Positions[a], m_Positions[b]);
-            float d = Vector2.Distance(from, q);
-            if (d < best)
-            {
-                best = d;
-                bestA = a;
-                bestB = b;
-                join = q;
-            }
-        }
+        if (!FindJoin(from, true, out int bestA, out int bestB, out Vector2 join))
+            FindJoin(from, false, out bestA, out bestB, out join);
+        float best = Vector2.Distance(from, join);
         // The user enters the graph at the join point and can walk either way along that link.
         float[] cost = NewCosts();
         cost[bestA] = Vector2.Distance(join, m_Positions[bestA]);
@@ -69,6 +62,42 @@ public class Router
             lead.Add(from);
         lead.Add(join);
         return Search(cost, lead, to);
+    }
+
+    // The nearest point on any link to p (its closest point or either end); with clear, only points the straight
+    // line from p reaches without crossing a wall. False if there's none (or no Walkable to say).
+    bool FindJoin(Vector2 p, bool clear, out int bestA, out int bestB, out Vector2 join)
+    {
+        bestA = bestB = 0;
+        join = p;
+        Walkable walkable = Walkable;
+        if (clear && walkable == null)
+            return false;
+        // A position a little inside a wall (tracking noise) looks from the nearest open spot instead.
+        Vector2 eye = p;
+        if (clear && !walkable.IsWalkable(p) && walkable.Nearest(p, 1.5f, out Vector2 open))
+            eye = open;
+
+        float best = float.PositiveInfinity;
+        bool found = false;
+        foreach (PlanEdge edge in m_Plan.edges)
+        {
+            int a = m_Plan.NodeIndex(edge.a), b = m_Plan.NodeIndex(edge.b);
+            Vector2 pa = m_Positions[a], pb = m_Positions[b];
+            Vector2 q = ClosestOnSegment(p, pa, pb);
+            foreach (Vector2 c in clear ? new[] { q, pa, pb } : new[] { q })
+            {
+                float d = Vector2.Distance(p, c);
+                if (d >= best || clear && !walkable.SegmentClear(eye, c))
+                    continue;
+                best = d;
+                bestA = a;
+                bestB = b;
+                join = c;
+                found = true;
+            }
+        }
+        return found;
     }
 
     float[] NewCosts()
@@ -89,7 +118,7 @@ public class Router
         for (int i = 0; i < count; i++)
             previous[i] = -1;
 
-        // A linear scan instead of a priority queue: there are under 100 points.
+        // A linear scan instead of a priority queue: there are a hundred-odd points.
         while (true)
         {
             int current = -1;
@@ -225,29 +254,42 @@ public class Route
     public float DistanceAtPoint(int index) => m_Distances[index];
 
     // Bends closer than a few metres count as one turn, so a jog around a pillar or a door spot either disappears
-    // (the bends cancel out) or reads as the single turn a person would make.
+    // (the bends cancel out) or reads as the single turn a person would make. A cluster's angle is the heading in
+    // against the heading out, so two 105-degree bends read as the 150-degree turn they make, not as 210 degrees.
+    // Then a slight bend one way and a slight bend back within a few metres (a hallway that jogs) cancel out.
     void FindTurns()
     {
         const float clusterGap = 3f;
+        const float jogGap = 5f;
         const float minimumTurn = 25f;
+        const float slightTurn = 55f;
+        var found = new List<RouteTurn>();
         int i = 1;
         while (i < points.Count - 1)
         {
-            float distance = m_Distances[i];
-            float angle = BendAt(i);
             int j = i + 1;
             while (j < points.Count - 1 && m_Distances[j] - m_Distances[j - 1] < clusterGap)
-            {
-                angle += BendAt(j);
                 j++;
-            }
+            // Segment (i - 1, i) in against segment (j - 1, j) out; zero-length segments read as no turn.
+            float angle = Vector2.SignedAngle(points[i] - points[i - 1], points[j] - points[j - 1]);
             if (Mathf.Abs(angle) >= minimumTurn)
-                turns.Add(new RouteTurn { distance = distance, angle = angle });
+                found.Add(new RouteTurn { distance = m_Distances[i], angle = angle });
             i = j;
         }
-    }
 
-    float BendAt(int i) => Vector2.SignedAngle(points[i] - points[i - 1], points[i + 1] - points[i]);
+        for (int k = 0; k < found.Count; k++)
+        {
+            if (k + 1 < found.Count && found[k + 1].distance - found[k].distance < jogGap
+                && found[k].angle * found[k + 1].angle < 0f
+                && Mathf.Abs(found[k].angle) < slightTurn && Mathf.Abs(found[k + 1].angle) < slightTurn
+                && Mathf.Abs(found[k].angle + found[k + 1].angle) < minimumTurn)
+            {
+                k++;   // both go
+                continue;
+            }
+            turns.Add(found[k]);
+        }
+    }
 
     public static Maneuver Classify(float angle)
     {

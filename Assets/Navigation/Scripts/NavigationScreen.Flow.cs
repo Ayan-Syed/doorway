@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -8,8 +9,7 @@ public partial class NavigationScreen
     void Awake()
     {
         Initialize();
-        // The screen stays on for the whole walk, and the UI animates at the screen's rate (Android defaults to 30).
-        Screen.sleepTimeout = SleepTimeout.NeverSleep;
+        // The UI animates at the screen's rate (Android defaults to 30). (Show keeps the screen on while walking.)
         Application.targetFrameRate = 60;
         // Unity's default drag threshold is 10 px, a twitch on a phone screen: taps in the lists would scroll.
         if (EventSystem.current != null && Screen.dpi > 0f)
@@ -132,6 +132,18 @@ public partial class NavigationScreen
         SetPretend(m_Pretend, false);
         UpdateStops();
 
+        // Hidden by their canvases from here on, never switched off (Layer). The maps stop with theirs.
+        m_Layers = new Dictionary<GameObject, Layer>();
+        AddLayer(map, map);
+        AddLayer(homePanel);
+        AddLayer(routePanel);
+        AddLayer(guidePanel, miniMap);
+        AddLayer(arrivedPanel);
+        foreach (BottomSheet sheet in new[] { homeSheet, placeSheet, startSheet, alignSheet })
+            AddLayer(sheet, sheet);
+        foreach (Layer layer in m_Layers.Values)
+            layer.Claim(m_Layers);
+
         snackbar.alpha = 0f;
         settingsPanel.gameObject.SetActive(false);
         floorMenu.gameObject.SetActive(false);
@@ -208,6 +220,23 @@ public partial class NavigationScreen
         if (launchLogo != null)
             launchLogo.localScale = Vector3.one * (1f + 0.12f * (1f - launchScreen.alpha));
         if (launchScreen.alpha <= 0f)
+        {
             launchScreen.gameObject.SetActive(false);
+            ReleaseLaunchLogo();
+        }
+    }
+
+    // The logo shows once, as the app opens: its pictures (day and night) needn't stay in memory after that.
+    void ReleaseLaunchLogo()
+    {
+        if (!Application.isPlaying || launchLogo == null || !launchLogo.TryGetComponent(out RawImage logo))
+            return;
+        var pictures = new List<Texture> { logo.texture };
+        if (themeColors != null)
+            themeColors.Forget(logo, pictures);
+        logo.texture = null;
+        foreach (Texture picture in new HashSet<Texture>(pictures))
+            if (picture != null)
+                Resources.UnloadAsset(picture);
     }
 }

@@ -6,9 +6,9 @@ using UnityEngine.UI;
 // over each wall, `height` metres up. Lives in the map's content, in plan metres x pixelsPerMeter, its origin
 // at plan (0, 0). Local -z is up off the floor (the map tilts its +y away from the camera).
 //
-// walls (Data/*-walls.bytes, from Tools/ba1-floor1/walls.py): int32 point count, ring count, index count;
-// int32 points in each ring; int16 x, z of each point in plan centimetres; int32 indices, three to a
-// triangle, for the tops.
+// walls (Data/*-walls.bytes, from Tools/ba1-floor1/walls.py, little-endian): "DWWL", uint16 version 1, uint16 0;
+// int32 point count, ring count, index count; int32 points in each ring; int16 x, z of each point in plan
+// centimetres; int32 indices, three to a triangle, for the tops.
 [RequireComponent(typeof(CanvasRenderer))]
 public class WallMesh : MaskableGraphic
 {
@@ -21,6 +21,9 @@ public class WallMesh : MaskableGraphic
 
     // Where the light comes from, in plan directions: sides facing it are lighter.
     static readonly Vector2 Light = new Vector2(-0.45f, 0.89f);
+
+    const string Magic = "DWWL";
+    const int Version = 1;
 
     int[] m_Rings;
     Vector2[] m_Points;
@@ -50,28 +53,23 @@ public class WallMesh : MaskableGraphic
         if (walls == null)
             return false;
 
-        byte[] b = walls.bytes;
-        int at = 0;
-        int Int() { int v = BitConverter.ToInt32(b, at); at += 4; return v; }
-
-        int pointCount = Int(), ringCount = Int(), indexCount = Int();
-        m_Rings = new int[ringCount];
-        for (int r = 0; r < ringCount; r++)
-            m_Rings[r] = Int();
-
-        var points = new Vector2[pointCount];
-        for (int i = 0; i < pointCount; i++)
+        Vector2[] points;
+        try
         {
-            points[i] = new Vector2(BitConverter.ToInt16(b, at), BitConverter.ToInt16(b, at + 2)) * 0.01f;
-            at += 4;
+            Parse(walls.bytes, walls.name, out m_Rings, out points, out m_Triangles);
+        }
+        catch (FormatException e)
+        {
+            // Once, not every rebuild: the map works on without its walls standing up.
+            Debug.LogError(e.Message);
+            m_Rings = new int[0];
+            m_Triangles = new int[0];
+            m_Points = new Vector2[0];
+            return true;
         }
 
-        m_Triangles = new int[indexCount];
-        for (int i = 0; i < indexCount; i++)
-            m_Triangles[i] = Int();
-
         // Tops face up, so clockwise from above (y up on screen).
-        for (int i = 0; i + 2 < indexCount; i += 3)
+        for (int i = 0; i + 2 < m_Triangles.Length; i += 3)
         {
             Vector2 u = points[m_Triangles[i + 1]] - points[m_Triangles[i]];
             Vector2 w = points[m_Triangles[i + 2]] - points[m_Triangles[i]];
@@ -81,6 +79,34 @@ public class WallMesh : MaskableGraphic
 
         m_Points = points;
         return true;
+    }
+
+    // Reads a walls file: FormatException, naming the file and the problem, for a short, foreign or inconsistent
+    // one (rings that don't add up to the points, a triangle index past them).
+    public static void Parse(byte[] bytes, string name, out int[] rings, out Vector2[] points, out int[] triangles)
+    {
+        var reader = new DataReader(bytes, name);
+        reader.Header(Magic, Version);
+        reader.UInt16();
+        int pointCount = reader.Int32(), ringCount = reader.Count("rings", 4), indexCount = reader.Int32();
+        rings = new int[ringCount];
+        long total = 0;
+        for (int r = 0; r < ringCount; r++)
+            total += rings[r] = reader.Int32();
+        if (pointCount < 0 || total != pointCount)
+            throw reader.Fail($"the rings hold {total} points but the file says {pointCount}");
+        points = reader.Points(pointCount, 0.01f);
+        if (indexCount < 0 || indexCount % 3 != 0)
+            throw reader.Fail($"{indexCount} triangle indices, not a whole number of triangles");
+        triangles = new int[indexCount];
+        for (int i = 0; i < indexCount; i++)
+        {
+            int v = reader.Int32();
+            if (v < 0 || v >= pointCount)
+                throw reader.Fail($"triangle index {v} is past the {pointCount} points");
+            triangles[i] = v;
+        }
+        reader.End();
     }
 
     static float SignedArea(Vector2[] points, int start, int count)

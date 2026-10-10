@@ -42,10 +42,19 @@ public static partial class BuildNavigateScene
             Alpha(s_T.onBanner, 0.85f), TextAnchor.MiddleLeft);
         BestFit(screen.maneuverDetail, 30);
 
-        // Off the route, tracking lost: a pill under the banner (NavigationScreen places it).
+        // Off the route, tracking lost, re-align: a pill under the banner (NavigationScreen places it). It's a button
+        // that only takes taps while it asks the user to re-align.
         RectTransform status = Fixed("Status", panel, new Vector2(0.5f, 1f), new Vector2(0f, -300f), new Vector2(0f, 84f));
         status.pivot = new Vector2(0.5f, 1f);
-        Card(status, s_T.surface, 42f, true);
+        Image statusSurface = Card(status, s_T.surface, 42f, true);
+        statusSurface.raycastTarget = true;
+        var statusButton = status.gameObject.AddComponent<Button>();
+        statusButton.transition = Selectable.Transition.None;
+        statusButton.targetGraphic = statusSurface;
+        statusButton.navigation = new Navigation { mode = Navigation.Mode.None };
+        statusButton.interactable = false;
+        status.gameObject.AddComponent<PressFeedback>().pressedScale = 0.97f;
+        screen.statusButton = statusButton;
         HorizontalRow(status, 16f, TextAnchor.MiddleCenter).padding = new RectOffset(32, 40, 0, 0);
         FitWidth(status);
         screen.statusPill = status;
@@ -80,7 +89,11 @@ public static partial class BuildNavigateScene
         actions.pivot = new Vector2(1f, 0.5f);
         HorizontalRow(actions, 16f, TextAnchor.MiddleRight).childForceExpandHeight = true;
         FitWidth(actions);
-        screen.realignButton = TextPill(actions, "Re-align", s_T.surfaceVariant, s_T.onSurface, out _, out _);
+        screen.realignButton = TextPill(actions, "Re-align", s_T.surfaceVariant, s_T.onSurface, out Image realignBackground,
+            out Text realignLabel);
+        // In the accent colour while the status pill asks for it.
+        screen.realignBackground = realignBackground;
+        screen.realignLabel = realignLabel;
         screen.endButton = TextPill(actions, "End", s_T.surfaceVariant, s_T.onSurface, out Image endBackground, out Text endLabel);
         screen.endBackground = endBackground;
         screen.endLabel = endLabel;

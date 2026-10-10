@@ -6,10 +6,14 @@ using static UIBuild;
 // so its y position is how much of it shows; BottomSheet moves and resizes it at runtime.
 public static partial class BuildNavigateScene
 {
-    // A sheet along the bottom: a card with a drag handle, the full width. Drags anywhere on it move it.
+    // A sheet along the bottom: a card with a drag handle, the full width. Drags anywhere on it move it. A canvas
+    // of its own, so sliding it moves one canvas instead of re-batching everything over the map, and a CanvasGroup
+    // NavigationScreen stops its taps with while it's hidden.
     static BottomSheet Sheet(string name, Transform parent, out RectTransform rect)
     {
         rect = Child(name, parent);
+        OwnCanvas(rect);
+        rect.gameObject.AddComponent<CanvasGroup>();
         rect.anchorMin = Vector2.zero;
         rect.anchorMax = new Vector2(1f, 0f);
         rect.pivot = new Vector2(0.5f, 1f);
@@ -28,6 +32,8 @@ public static partial class BuildNavigateScene
     static PlaceList List(RectTransform sheetRect, BottomSheet sheet, float top)
     {
         RectTransform viewport = Stretch("List", sheetRect, 0f, 0f, top, sheet.extra);
+        // A canvas of its own: scrolling moves its rows and nothing else's.
+        OwnCanvas(viewport);
         var hit = viewport.gameObject.AddComponent<Image>();
         hit.color = Color.clear;   // Clear, but catches drags between rows so they scroll the list.
         hit.raycastTarget = true;

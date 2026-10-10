@@ -4,6 +4,8 @@ ground. The app draws room numbers and icons on top, so they stay upright as the
 
 Run after graph.py --export and segment.py: python basemap.py [theme ...]
 The labels, place grid, UI textures and icons are rebuilt every time, whatever themes are named.
+places.bytes (little-endian): "DWPL", uint16 version (1), uint16 width, uint16 height, uint32 FNV-1a hash of the
+place ids (graph.place_id_hash), then a byte per 5 x 5 px cell, top row first: the place's index + 1, or 0.
 """
 import json
 import os
@@ -152,7 +154,9 @@ def places_and_labels(R, ids, texts, kinds):
     small = owner[R[2::5, 2::5]]                          # the middle of each 5x5 cell
     h, w = small.shape
     with open(os.path.join(graph.DATA_DIR, "ba1-floor1-places.bytes"), "wb") as f:
-        f.write(struct.pack("<HH", w, h))
+        # Header: magic, version, size, and a hash of the place ids in order, since a cell holds an index into them.
+        f.write(struct.pack("<4sHHHI", graph.PLACES_MAGIC, graph.FORMAT_VERSION, w, h,
+                            graph.place_id_hash([p["id"] for p in plan["places"]])))
         f.write(np.ascontiguousarray(small).tobytes())
     print(len(labels), "labels,", len(set(small[small > 0].tolist())), "places on the place map", (w, h))
 

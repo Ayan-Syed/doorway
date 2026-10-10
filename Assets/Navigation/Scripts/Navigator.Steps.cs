@@ -8,7 +8,7 @@ public partial class Navigator
     const float TurnFirstAngle = 50f;
 
     // What to do next: a turn coming up (and how far away), or arriving. then is the step after that, gap metres
-    // further on.
+    // further on. The guide screen asks every frame, so this and DoorSide allocate nothing.
     public Maneuver NextStep(out float distance, out Maneuver then, out float gap)
     {
         // A turn stays up until a metre past it.
@@ -86,7 +86,12 @@ public partial class Navigator
         HasArrived = arrived;
         Progress = progress;
         OffRoute = 0f;
+        IsOffRoute = false;
+        ShouldRealign = false;
+        m_LostTime = 0f;
+        m_Filter = null;
         UserPosition = Route.PointAt(progress);
+        RawPosition = UserPosition;
         UserHeading = Heading(Route.DirectionAt(progress)) + turn;
         planRoot.gameObject.SetActive(true);
         if (arrived)

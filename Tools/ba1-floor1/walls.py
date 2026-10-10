@@ -3,10 +3,10 @@ They are the lines basemap.py draws between rooms (and round the building, thick
 those lines. If you change basemap's line widths or smoothing, re-run this.
 
 Run after segment.py: python walls.py -> Assets/Navigation/Data/ba1-floor1-walls.bytes
-The file (little-endian): int32 point count, ring count, index count; int32 points per ring; then each
-point as int16 x, z in plan centimetres (x right, z up), rings one after another, each outer ring
-followed by its holes; then int32 triangle indices into all the points. The app stands a side up along
-each ring and puts the tops on them.
+The file (little-endian): "DWWL", uint16 version (1), uint16 0; int32 point count, ring count, index
+count; int32 points per ring; then each point as int16 x, z in plan centimetres (x right, z up), rings one
+after another, each outer ring followed by its holes; then int32 triangle indices into all the points. The
+app stands a side up along each ring and puts the tops on them.
 """
 import os
 import struct
@@ -79,6 +79,7 @@ def main():
     assert np.abs(cm).max() < 32767, "floor too big for int16 centimetres"
     index = np.concatenate(tris)
     with open(os.path.join(graph.DATA_DIR, "ba1-floor1-walls.bytes"), "wb") as f:
+        f.write(struct.pack("<4sHH", graph.WALLS_MAGIC, graph.FORMAT_VERSION, 0))
         f.write(struct.pack("<iii", len(pts), len(rings), len(index)))
         f.write(np.array([len(r) for r in rings], "<i4").tobytes())
         f.write(cm.astype("<i2").tobytes())

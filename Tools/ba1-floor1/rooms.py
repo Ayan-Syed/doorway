@@ -2,8 +2,10 @@
 
 Doorways are where a room's region meets the walkway with open floor on both sides (segment.py floods
 rooms and hallways from their middles, so the floods meet in the door openings). Each doorway gets a door
-spot in the hallway just outside it, joined to the nearest hallway line it can see. A room with no doorway
-onto the hallway (an office in a suite) uses the door of the room it opens off: 'Inside 145'.
+spot in the hallway just outside it, straight out from the wall (doors.wall_normal measures the wall's
+direction; the pixel steps along the opening only give a rough one), joined to the nearest hallway line it
+can see. A room with no doorway onto the hallway (an office in a suite) uses the door of the room it opens
+off: 'Inside 145'.
 Run after segment.py and before graph.py --export: python rooms.py -> rooms.json, check/rooms_check.png
 """
 import json
@@ -15,13 +17,15 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 import graph
+from doors import Ink, wall_normal
 
 OUTSIDE, WALKWAY = 1, 2
 MIN_OPENING = 14                   # plan px of open boundary for a doorway (~0.5 m)
 OUT_STEP = 20                      # how far into the hallway the door spot goes (~0.7 m)
 MAX_LINK = 16 * graph.PX_PER_M     # longest door-to-hallway link (16 m)
-# Lift shafts the segmentation merged into the lobby: their doors aren't rooms' doors. (x0, y0, x1, y1)
-EXCLUDE = [(955, 980, 1030, 1135)]
+# Lift shafts the segmentation merged into the hallway: their doors aren't rooms' doors. (x0, y0, x1, y1)
+# The lobby's two lifts (143, 144), and the atrium lift's car in front of 107A, whose side touches 109.
+EXCLUDE = [(955, 980, 1030, 1135), (1950, 1420, 2030, 1490)]
 # Rooms whose way in the search gets wrong (130A opens off the lounge, not across the wall into 121).
 PARENT = {"130A": "130"}
 
@@ -82,6 +86,7 @@ def main():
     with np.load(graph.need(graph.REGIONS, "run segment.py first (or make_data.py)")) as d:
         R, wall = d["regions"], d["wall"]
         names = {int(i): (str(t), str(k)) for i, t, k in zip(d["ids"], d["texts"], d["kinds"])}
+        ink = Ink(d["dark"])
     dark = graph.plan_gray() < 110         # stricter than segment's 170, so faint marks don't block links
     free = ~wall
     known = {p[0] for p in graph.P}
@@ -150,7 +155,10 @@ def main():
             cy = sum(p[1] for p in c) / len(c)
             nx, ny = sum(p[2] for p in c), sum(p[3] for p in c)
             h = math.hypot(nx, ny) or 1.0
-            nx, ny = nx / h, ny / h                      # into the hallway
+            nx, ny = nx / h, ny / h                      # into the hallway, roughly: a ratio of pixel steps
+            fitted = wall_normal(ink, cx, cy, -nx, -ny)
+            if fitted and fitted[2]:                     # on the plan's 45-degree grid: trust it
+                nx, ny = -fitted[0][0], -fitted[0][1]    # straight out of the wall
             step = OUT_STEP
             while step > 4:                              # out into the hallway, but not into a wall
                 x, y = int(round(cx + nx * step)), int(round(cy + ny * step))

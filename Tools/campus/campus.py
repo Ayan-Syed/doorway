@@ -5,7 +5,11 @@ water, parking, paths, roads), merges and triangulates each layer, and keeps eve
 roof triangles, height and label spot.
 Run from anywhere: python campus.py [osm/ucf.json]
   -> Assets/Navigation/Data/ucf-campus.bytes and ucf-campus.json (written at the end of main(), read by CampusData.cs).
-Needs Assets/Navigation/Data/ba1-floor1.json (only its geo block): run the floor pipeline first.
+Needs Assets/Navigation/Data/ba1-floor1.json (only its geo block): run the floor pipeline first. The geo block used
+is copied into ucf-campus.json, so the app's data check can tell when the campus needs building again.
+ucf-campus.bytes (little-endian): "DWCP", uint16 version (1), uint16 0; int32 chunk count, then per chunk int32
+layer, vertex count, index count, int16 x, y decimetres per vertex, uint16 indices; int32 building count, then per
+building int32 height (dm), ring count, index count, int32 points per ring, int16 x, y dm, uint16 indices.
 """
 import json
 import os
@@ -48,6 +52,8 @@ HEIGHTS = {"university": 14, "college": 14, "dormitory": 13, "apartments": 11, "
            "detached": 7, "terrace": 7, "office": 13, "commercial": 7, "retail": 6, "industrial": 9,
            "parking": 14, "stadium": 20, "roof": 5, "service": 4, "pavilion": 5, "public": 8, "garage": 4}
 CHUNK = 60000         # vertices per ground chunk, so indices fit in uint16
+GROUND_BUDGET = 60000  # all chunks go into one uGUI mesh (CampusGround), which tops out near 65k vertices
+MAGIC, VERSION = b"DWCP", 1
 
 
 class Geo:
@@ -169,7 +175,8 @@ def main():
         if not os.path.exists(path):
             sys.exit(f"Missing {path}: {how}")
     with open(PLAN, encoding="utf-8") as f:
-        geo = Geo(json.load(f)["geo"])
+        geo_block = json.load(f)["geo"]
+    geo = Geo(geo_block)
     with open(osm, encoding="utf-8") as f:
         elements = json.load(f)["elements"]
 
@@ -240,6 +247,13 @@ def main():
                 chunks.append((layer, np.concatenate(verts), np.concatenate(tris)))
         print(f"{LAYERS[layer]:>13}: {count} vertices")
 
+    ground = sum(len(c[1]) for c in chunks)
+    if ground > GROUND_BUDGET:
+        sys.exit(f"{ground} ground vertices: over the {GROUND_BUDGET} one uGUI mesh can hold. Simplify more "
+                 f"(the 0.25 m in main()) or drop a layer.")
+    if any(len(c[1]) > 65535 for c in chunks):
+        sys.exit("a ground chunk has more than 65535 vertices: its uint16 indices would wrap")
+
     records, infos = [], []
     for el, a in buildings:
         tags = el.get("tags", {})
@@ -252,6 +266,8 @@ def main():
             _, tri, rings = triangulate(p)
             if tri is None:
                 continue
+            if sum(len(r) for r in rings) > 65535:
+                sys.exit(f"building {name or el['id']} has more than 65535 outline points (uint16 indices)")
             height = height_of(tags, name)
             spot = polylabel(p, 0.5)       # the point deepest inside: better than the centroid for L and U shapes
             infos.append({"name": name, "x": round(spot.x, 2), "y": round(spot.y, 2), "area": round(p.area, 1),
@@ -266,6 +282,7 @@ def main():
     lo, hi = frame.bounds[:2], frame.bounds[2:]
 
     with open(OUT + ".bytes", "wb") as f:
+        f.write(struct.pack("<4sHH", MAGIC, VERSION, 0))
         f.write(struct.pack("<i", len(chunks)))
         for layer, verts, tri in chunks:
             assert tri.max() < 65536
@@ -281,7 +298,7 @@ def main():
     info = {"attribution": "(c) OpenStreetMap contributors",
             "middle": [round(float(middle[0]), 1), round(float(middle[1]), 1)],
             "min": [round(lo[0], 1), round(lo[1], 1)], "max": [round(hi[0], 1), round(hi[1], 1)],
-            "buildings": infos}
+            "geo": geo_block, "buildings": infos}
     with open(OUT + ".json", "w", encoding="utf-8") as f:
         json.dump(info, f, ensure_ascii=False, separators=(",", ":"))
     print(f"{len(chunks)} chunks, {sum(len(c[1]) for c in chunks)} ground vertices; {len(records)} buildings, "

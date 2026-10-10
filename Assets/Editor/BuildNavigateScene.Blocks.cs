@@ -149,10 +149,21 @@ public static partial class BuildNavigateScene
         return halo;
     }
 
-    // One screen panel that can fade.
+    // One screen panel that can fade. A canvas of its own (with its own raycaster, for its taps): what changes on
+    // it re-batches only it, and NavigationScreen hides it by switching the canvas off, which keeps its meshes.
     static CanvasGroup Panel(string name, Transform parent)
     {
-        return Stretch(name, parent).gameObject.AddComponent<CanvasGroup>();
+        RectTransform rect = Stretch(name, parent);
+        OwnCanvas(rect);
+        return rect.gameObject.AddComponent<CanvasGroup>();
+    }
+
+    // A nested canvas that takes its own taps (a canvas's graphics are hit only through a raycaster on it).
+    static Canvas OwnCanvas(RectTransform rect)
+    {
+        var canvas = rect.gameObject.AddComponent<Canvas>();
+        rect.gameObject.AddComponent<GraphicRaycaster>();
+        return canvas;
     }
 
     static void ConfigureField(InputField field, Graphic target, Text text, Text placeholder)

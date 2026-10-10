@@ -8,8 +8,9 @@ using UnityEngine.Android;
 // Where the phone's GPS puts the user on the floor plan, so the start door picks itself. Indoors GPS is rough (often
 // tens of metres) and jumps about, so the last few fixes are averaged, and it only ever suggests: the nearest doors,
 // and the user can pick another. Asks for location as the app opens, and again when the user asks for directions if
-// the answer was no; starts again when the user comes back with location turned on. For demos it can pretend the
-// phone is somewhere.
+// the answer was no; starts again when the user comes back with location turned on. It rests (Suspend) while
+// nothing needs it, and forgets its fixes whenever it stops, so an old fix never stands in for a new one. For demos
+// it can pretend the phone is somewhere.
 public class UserLocation : MonoBehaviour
 {
     [Tooltip("A fix older than this many seconds doesn't count.")]
@@ -23,6 +24,9 @@ public class UserLocation : MonoBehaviour
     const int MaxRecent = 8;
     // Android's answer to the permission request.
     const int Granted = 1, Denied = 2, DeniedForGood = 3;
+    // An answer that never comes (Unity marks one callback unreliable) stops holding others up, and lets the next
+    // Retry ask again, after this many seconds of the app in front with no dialog.
+    const float AskTimeout = 20f;
 
     /// <summary>There is a usable position: a pretend one, or a real, fresh fix.</summary>
     public bool HasFix { get; private set; }
@@ -32,12 +36,16 @@ public class UserLocation : MonoBehaviour
     public float Accuracy { get; private set; }
     /// <summary>No location: the user said no, it's off in the phone's settings, or it broke.</summary>
     public bool Unavailable => m_Off && m_Pretend == null;
+    /// <summary>Android's location permission dialog is up (or about to be): another permission request now
+    /// would be refused unseen.</summary>
+    public bool IsAsking => m_Asking;
 
     /// <summary>A new fix, the fix lost, or the location turned off or on.</summary>
     public event Action Changed;
 
     FloorPlan m_Plan;
-    bool m_Running, m_Preview, m_Asking, m_DontAsk, m_Off, m_RealFix;
+    bool m_Running, m_Preview, m_Asking, m_DontAsk, m_Off, m_RealFix, m_Suspended;
+    float m_AskingFor;
     // Set on Android's thread by the permission callbacks, so it's only ever a number; read in Update.
     volatile int m_Answer;
     Vector2? m_Pretend;
@@ -56,7 +64,7 @@ public class UserLocation : MonoBehaviour
     // Starts the location service if it isn't running. ask: may show Android's permission dialog.
     public void Retry(bool ask)
     {
-        if (m_Running || m_Asking || m_Preview || m_Plan?.geo == null || !m_Plan.geo.IsSet)
+        if (m_Running || m_Asking || m_Preview || m_Suspended || m_Plan?.geo == null || !m_Plan.geo.IsSet)
             return;
 #if UNITY_ANDROID && !UNITY_EDITOR
         if (!Permission.HasUserAuthorizedPermission(Permission.FineLocation))
@@ -67,6 +75,7 @@ public class UserLocation : MonoBehaviour
                 return;
             }
             m_Asking = true;
+            m_AskingFor = 0f;
             SetOff(false);
             var callbacks = new PermissionCallbacks();
             callbacks.PermissionGranted += _ => m_Answer = Granted;
@@ -104,10 +113,52 @@ public class UserLocation : MonoBehaviour
 
     void SetOff(bool off)
     {
+        if (off)
+            ForgetFixes();
         if (m_Off == off)
             return;
         m_Off = off;
         Changed?.Invoke();
+    }
+
+    // Stopped, the service's last fix only gets older: drop it, so nothing picks a start door from it.
+    void ForgetFixes()
+    {
+        m_Recent.Clear();
+        m_LastTimestamp = 0;
+        if (!m_RealFix)
+            return;
+        m_RealFix = false;
+        Publish();
+        if (m_Pretend == null)
+            Changed?.Invoke();
+    }
+
+    void StopService()
+    {
+        try
+        {
+            if (m_Running)
+                Input.location.Stop();
+        }
+        catch (Exception)
+        {
+        }
+        m_Running = false;
+        ForgetFixes();
+    }
+
+    // Rests the service while nothing uses it (walking, arrived): GPS searching indoors is a steady drain on top of
+    // the camera and ARCore. Off again, it starts as it would on coming back to the app.
+    public void Suspend(bool on)
+    {
+        if (m_Suspended == on || m_Preview)
+            return;
+        m_Suspended = on;
+        if (on)
+            StopService();
+        else
+            Retry(false);
     }
 
     // For demos away from the building: the location is this plan point until Pretend(null).
@@ -137,12 +188,22 @@ public class UserLocation : MonoBehaviour
             m_Answer = 0;
             m_Asking = false;
             if (answer == Granted)
-                StartService();
+            {
+                if (!m_Suspended)
+                    StartService();
+            }
             else
             {
                 m_DontAsk |= answer == DeniedForGood;
                 SetOff(true);
             }
+        }
+        else if (m_Asking && Application.isFocused)
+        {
+            // The dialog takes the focus while it's up, so this only counts time with no dialog showing.
+            m_AskingFor += Time.unscaledDeltaTime;
+            if (m_AskingFor >= AskTimeout)
+                m_Asking = false;
         }
 
         if (!m_Running || Time.unscaledTime < m_NextPoll)
@@ -151,13 +212,20 @@ public class UserLocation : MonoBehaviour
         Poll();
     }
 
-    // Once a second: a new fix into the average, or notice the fix going stale or the service failing.
+    // Once a second: a new fix into the average, or notice the fix going stale, the service failing, or location
+    // switched off in the phone's settings (the service itself just goes quiet then).
     void Poll()
     {
         bool fix = false;
         try
         {
             LocationServiceStatus status = Input.location.status;
+            if (!Input.location.isEnabledByUser)
+            {
+                StopService();
+                SetOff(true);
+                return;
+            }
             if (status == LocationServiceStatus.Failed)
             {
                 m_Running = false;
@@ -232,16 +300,9 @@ public class UserLocation : MonoBehaviour
         try
         {
             if (paused)
-            {
-                // Saves battery in the background.
-                if (m_Running)
-                    Input.location.Stop();
-                m_Running = false;
-            }
+                StopService();   // saves battery in the background, and the fix is stale on return
             else
-            {
-                Retry(false);   // permission may have been given in Settings meanwhile; never shows a dialog
-            }
+                Retry(false);    // permission may have been given in Settings meanwhile; never shows a dialog
         }
         catch (Exception)
         {
