@@ -152,6 +152,14 @@ public partial class NavigationScreen
         }
         m_Retries = 0;
 
+        // A room that isn't on the plan. Whatever was asked stays asked, for the next try.
+        if (intent.unknownPlace && intent.here == null && intent.destination == null)
+        {
+            m_Question = question;
+            Reply(NoRoomMessage);
+            return;
+        }
+
         // Walking somewhere new: start from the door nearest where the user is now.
         if (m_Step == Step.Guide && intent.here == null && intent.destination != null)
         {
@@ -177,6 +185,8 @@ public partial class NavigationScreen
                 Ask(VoiceAsk.Location, $"Sure. To find the nearest {VoiceKinds.Spoken(intent.destination)}, " +
                                        "where are you now? Tell me a room number or something you can see.");
             }
+            else
+                Reply(NoRoomMessage);
             return;
         }
         if (intent.here != null)
@@ -255,7 +265,7 @@ public partial class NavigationScreen
         List<PlanPlace> candidates = Candidates(id);
         if (candidates.Count == 0)
         {
-            Reply("Sorry, I don't know that place.");
+            Reply(NoRoomMessage);
             return false;
         }
         List<PlanPlace> near = nearId == null ? null : Candidates(nearId);

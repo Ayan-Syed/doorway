@@ -34,6 +34,8 @@ public class VoiceIntent
     /// <summary>The option picked when the question offered some, or -1.</summary>
     public int choice = -1;
     public VoiceAction action;
+    /// <summary>A room was asked for or named, but nothing on this floor matches ("room 999", "the gym").</summary>
+    public bool unknownPlace;
 
     public bool Understood => here != null || destination != null || choice >= 0 ||
                               action != VoiceAction.None && action != VoiceAction.Unknown;
@@ -113,7 +115,10 @@ public static class FunctionGemmaFormat
                 arguments[argument.Groups[1].Value] = value.Trim();
             }
             arguments.TryGetValue("place", out string place);
+            string named = place;
             place = Known(place, plan);
+            if (place == null && !string.IsNullOrEmpty(named) && call.Groups[1].Value != "command")
+                intent.unknownPlace = true;
             switch (call.Groups[1].Value)
             {
                 case "set_location":

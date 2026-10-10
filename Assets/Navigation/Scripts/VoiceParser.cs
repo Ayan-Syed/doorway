@@ -168,6 +168,7 @@ public class VoiceParser : IVoiceInterpreter
         }
 
         List<string> words = SpokenNumbers(raw);
+        bool missed = false;   // asked for a place ("take me to…", a room number) that isn't on the plan
         foreach (var (role, segment) in Segments(words))
         {
             Role assigned = role;
@@ -176,20 +177,33 @@ public class VoiceParser : IVoiceInterpreter
             if (assigned == Role.None)
                 assigned = question == null || question.ask == VoiceAsk.Nothing || question.ask == VoiceAsk.Destination
                     ? Role.Go : Role.Here;
+            bool found;
             if (assigned == Role.Go)
             {
                 if (intent.destination == null)
                     intent.destination = Best(segment);
+                found = intent.destination != null;
             }
-            else if (intent.here == null)
-                ReadHere(segment, intent);
+            else
+            {
+                if (intent.here == null)
+                    ReadHere(segment, intent);
+                found = intent.here != null;
+            }
+            // After a cue ("take me to the gym") any words count; without one, only a number ("room 999").
+            if (!found && (role != Role.None ? segment.Exists(w => !Stop.Contains(w)) : HasNumber(segment)))
+                missed = true;
         }
         if (intent.here != null || intent.destination != null)
             return intent;
 
         intent.action = Command(raw);
+        // "I'm lost" has a cue too, and is a command: only what no command explains is a place that isn't here.
+        intent.unknownPlace = missed && intent.action == VoiceAction.Unknown;
         return intent;
     }
+
+    static bool HasNumber(List<string> words) => words.Exists(w => char.IsDigit(w[0]));
 
     // "Where I am": the place, a second landmark if one is named, and which door.
     void ReadHere(List<string> segment, VoiceIntent intent)

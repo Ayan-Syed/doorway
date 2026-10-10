@@ -152,7 +152,8 @@ public partial class NavigationScreen
     string m_FromTitle;            // the start door's name, for the origin row
     bool m_FromAuto;               // the start was picked from the phone's location: the origin row says how near
 
-    // The conversation (NavigationScreen.Voice).
+    // The conversation (NavigationScreen.Voice). Said when a room asked for isn't on the plan.
+    const string NoRoomMessage = "Cannot find valid room in this building";
     IVoiceInterpreter m_Interpreter;
     bool m_Voice = true;           // spoken directions and answers (Settings)
     bool m_Conversing;             // the user has used the mic: the app talks them through lining up
