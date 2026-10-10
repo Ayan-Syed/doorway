@@ -57,12 +57,13 @@ public partial class NavigationScreen
         UpdateHomeChrome();
     }
 
-    // The directory: the rooms by kind of room, then restrooms, elevators and stairs, and entrances, each a dropdown
-    // that starts closed, so the sheet opens on a short list of groups.
+    // The directory, each group a dropdown that starts closed, so the sheet opens on a short list: the named kinds of
+    // room (Classrooms, Lecture halls), then restrooms, elevators and stairs, and entrances, then Other rooms and
+    // Other spaces last.
     void FillHome()
     {
         homeList.Clear();
-        AddRooms();
+        AddRooms(false);
         foreach (var (title, kinds) in Sections)
         {
             if (Array.IndexOf(kinds, "room") >= 0)
@@ -78,12 +79,14 @@ public partial class NavigationScreen
                 homeList.AddRow(place.kind, PlaceStyle.Title(place), place.detail, () => ShowPlace(place));
             }
         }
+        AddRooms(true);
     }
 
-    // A dropdown per kind of room the plan names ("Classroom" -> Classrooms), with the one-of-a-kind ones together
-    // in Other spaces and the plain "Room"s last in Other rooms. A room inside another ("Inside 145") goes under it,
-    // behind its "n inside" button; one inside a room that's itself inside one goes under the outermost.
-    void AddRooms()
+    // A dropdown per kind of room the plan names ("Classroom" -> Classrooms), the biggest first; or, for other, the
+    // plain "Room"s in Other rooms and then the one-of-a-kind ones in Other spaces. A room inside another
+    // ("Inside 145") goes under it, behind its "n inside" button; one inside a room that's itself inside one goes
+    // under the outermost.
+    void AddRooms(bool other)
     {
         List<PlanPlace> rooms = Places(new[] { "room" }).ToList();
         var byNumber = new Dictionary<string, PlanPlace>();
@@ -117,10 +120,10 @@ public partial class NavigationScreen
                 return OtherRooms;
             return types[type] > 1 ? (type.EndsWith("s") ? type : type + "s") : OtherSpaces;
         }
-        // Named kinds first, the biggest first; then the one-offs; then the plain rooms.
         IEnumerable<IGrouping<string, PlanPlace>> groups = outer.GroupBy(Group)
-            .OrderBy(g => g.Key == OtherRooms ? 2 : g.Key == OtherSpaces ? 1 : 0)
-            .ThenByDescending(g => g.Count())
+            .Where(g => (g.Key == OtherRooms || g.Key == OtherSpaces) == other)
+            .OrderBy(g => g.Key == OtherRooms ? 0 : g.Key == OtherSpaces ? 1 : 0)
+            .ThenByDescending(g => other ? 0 : g.Count())
             .ThenBy(g => g.Key, StringComparer.Ordinal);
 
         foreach (IGrouping<string, PlanPlace> group in groups)
