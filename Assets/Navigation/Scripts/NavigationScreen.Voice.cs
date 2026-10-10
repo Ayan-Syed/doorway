@@ -460,7 +460,7 @@ public partial class NavigationScreen
             Ask(VoiceAsk.Location, "I can't tell where you are yet. Tell me a room number or sign you can see.");
             return;
         }
-        bool outside = m_Step != Step.Guide && Outside(at.Value);
+        bool outside = m_Step != Step.Guide && Outside(at.Value, location.Accuracy);   // off Guide, at is the GPS fix
         PlanPlace nearest = null;
         float best = float.PositiveInfinity;
         foreach (PlanPlace p in Plan.places)
