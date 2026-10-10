@@ -6,8 +6,8 @@ using UnityEngine.Scripting;
 // is set to. No plugin: JNI calls, like Haptics.
 //
 // When an utterance ends isn't reported here (UtteranceProgressListener is an abstract class, which a proxy
-// can't implement), so IsSpeaking asks the engine, a few times a second. The conversation waits on it before
-// listening again, so the microphone never hears the app's own voice.
+// can't implement), so IsSpeaking asks the engine, a few times a second. The mic button stops the voice before it
+// listens, so the microphone never hears the app's own voice.
 // In the editor the words go to the console, and IsSpeaking lasts about as long as saying them would.
 public class VoiceOutput : MonoBehaviour
 {
