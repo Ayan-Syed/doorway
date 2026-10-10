@@ -47,6 +47,9 @@ public static partial class BuildNavigateScene
         screen.location = screen.gameObject.AddComponent<UserLocation>();
         screen.markerSprites = s_Emoji;
         screen.themeColors = screen.gameObject.AddComponent<ThemeColors>();
+        // The Localizer the AR part of the scene made (none: GPS only, every walk starts at a door).
+        screen.localizer = Object.FindAnyObjectByType<Localizer>();
+        screen.debugOverlay.localizer = screen.localizer;
 
         bool recorded = RecordNight(screen.themeColors, screen.gameObject, night.gameObject);
         Object.DestroyImmediate(night.gameObject);
@@ -109,8 +112,11 @@ public static partial class BuildNavigateScene
         CreateArrived(screen, safeArea);
         CreateDirections(screen, safeArea);
         CreateHome(screen, safeArea);
+        CreatePositionBanner(screen, safeArea);
+        CreateSnapCard(screen, safeArea);
         CreateSettings(screen, safeArea);
         CreateSnackbar(screen, safeArea);
+        CreateDebugOverlay(screen, safeArea);
         CreateLaunch(screen, rootRect);
 
         // Google Sans's lines are tall for its size: a line a little taller than its box draws nothing at all

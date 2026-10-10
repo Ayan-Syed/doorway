@@ -45,6 +45,7 @@ public class UserLocation : MonoBehaviour
 
     FloorPlan m_Plan;
     bool m_Running, m_Preview, m_Asking, m_DontAsk, m_Off, m_RealFix, m_Suspended;
+    bool m_Asleep, m_Resting, m_Needed;
     float m_AskingFor;
     // Set on Android's thread by the permission callbacks, so it's only ever a number; read in Update.
     volatile int m_Answer;
@@ -64,7 +65,7 @@ public class UserLocation : MonoBehaviour
     // Starts the location service if it isn't running. ask: may show Android's permission dialog.
     public void Retry(bool ask)
     {
-        if (m_Running || m_Asking || m_Preview || m_Suspended || m_Plan?.geo == null || !m_Plan.geo.IsSet)
+        if (m_Running || m_Asking || m_Preview || m_Asleep || m_Plan?.geo == null || !m_Plan.geo.IsSet)
             return;
 #if UNITY_ANDROID && !UNITY_EDITOR
         if (!Permission.HasUserAuthorizedPermission(Permission.FineLocation))
@@ -155,7 +156,48 @@ public class UserLocation : MonoBehaviour
         if (m_Suspended == on || m_Preview)
             return;
         m_Suspended = on;
-        if (on)
+        Reconsider();
+    }
+
+    /// <summary>Indoors (the Localizer): GPS can't help, so it rests, whatever the screens say.</summary>
+    public bool Resting
+    {
+        get => m_Resting;
+        set
+        {
+            if (m_Resting == value)
+                return;
+            m_Resting = value;
+            Reconsider();
+        }
+    }
+
+    /// <summary>Indoors near an exit (the Localizer): GPS runs whatever else says, to see the user walk out.</summary>
+    public bool Needed
+    {
+        get => m_Needed;
+        set
+        {
+            if (m_Needed == value)
+                return;
+            m_Needed = value;
+            Reconsider();
+        }
+    }
+
+    /// <summary>Seconds since the newest real fix was taken (infinite with none).</summary>
+    public double FixAge => m_LastTimestamp > 0
+        ? (DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds - m_LastTimestamp
+        : double.PositiveInfinity;
+
+    // Asleep when the screens suspend it or the Localizer rests it, unless the Localizer needs it.
+    void Reconsider()
+    {
+        bool asleep = (m_Suspended || m_Resting) && !m_Needed;
+        if (asleep == m_Asleep)
+            return;
+        m_Asleep = asleep;
+        if (asleep)
             StopService();
         else
             Retry(false);
@@ -189,7 +231,7 @@ public class UserLocation : MonoBehaviour
             m_Asking = false;
             if (answer == Granted)
             {
-                if (!m_Suspended)
+                if (!m_Asleep)
                     StartService();
             }
             else

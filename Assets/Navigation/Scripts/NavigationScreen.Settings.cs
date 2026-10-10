@@ -8,8 +8,14 @@ public partial class NavigationScreen
     // Only from Home or Place.
     void OpenSettings()
     {
+        if (m_SwallowSettingsTap)
+        {
+            m_SwallowSettingsTap = false;   // the long press that turned the debug overlay on or off
+            return;
+        }
         if (m_Step > Step.Place)
             return;
+        StyleLeftBuilding();
         if (searchField.isFocused)
             searchField.DeactivateInputField();
         SetFloorMenu(false);

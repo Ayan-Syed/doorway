@@ -84,9 +84,20 @@ public static partial class BuildNavigateScene
         screen.pretendToggle = SwitchRow(sheet, "Pretend", 1152f, "Pretend I'm here", "For demos: you're at its entrance",
             out screen.pretendTitle, out screen.pretendDetail, out screen.pretendTrack, out screen.pretendKnob);
 
+        // Indoor positioning off, back to GPS: a plain row (NavigationScreen dims it while outdoors).
+        RectTransform left = TopBand("Left Building", sheet, 1272f, 120f, 0f, 0f);
+        screen.leftBuildingButton = FlatButton(left, 0f);
+        left.gameObject.AddComponent<CanvasGroup>();
+        Text leftTitle = TextIn(TopBand("Title", left, 14f, 50f, 48f, 48f), "I've left the building", s_SemiBold, 38,
+            s_T.onSurface, TextAnchor.MiddleLeft);
+        BestFit(leftTitle, 28);
+        screen.leftBuildingDetail = TextIn(TopBand("Detail", left, 66f, 42f, 48f, 48f), "Back to GPS for the campus map",
+            s_Regular, 32, s_T.onSurfaceVariant, TextAnchor.MiddleLeft);
+        BestFit(screen.leftBuildingDetail, 24);
+
         // Where the maps come from, as their licences ask: under everything else, in the small grey of the
-        // settings' detail lines. It ends at 1352, inside the open sheet (1360 high).
-        Text credits = TextIn(TopBand("Credits", sheet, 1280f, 72f, 48f, 48f),
+        // settings' detail lines. It ends at 1472, inside the open sheet (1480 high).
+        Text credits = TextIn(TopBand("Credits", sheet, 1400f, 72f, 48f, 48f),
             "Floor plan: Knight Hacks forge (MIT) · Map data © OpenStreetMap contributors",
             s_Regular, 32, s_T.onSurfaceVariant, TextAnchor.MiddleLeft);
         BestFit(credits, 22);

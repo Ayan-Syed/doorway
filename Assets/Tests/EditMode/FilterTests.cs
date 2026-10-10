@@ -133,7 +133,7 @@ public class FilterTests
     }
 
     [Test]
-    public void OneContradictingSightingIsAMisreadTwoAreAFix()
+    public void OneContradictingSightingIsAMisreadTwoStartAgainFromTheSign()
     {
         Walkable walkable = Hallway();
         var filter = new PositionFilter(walkable, PositionFilter.DefaultCount, 12);
@@ -144,7 +144,12 @@ public class FilterTests
 
         Assert.IsFalse(filter.AddSignObservation(PositionFilter.Heading(toSign), toSign.magnitude, 0.3f, sign, normal));
         Assert.AreEqual(before, filter.Estimate);
+        // The second: the filter starts again on the sign's ring, any heading (one sign can't say where on the ring)...
         Assert.IsTrue(filter.AddSignObservation(PositionFilter.Heading(toSign), toSign.magnitude, 0.3f, sign, normal));
+        Assert.AreEqual(180f, filter.HeadingLimit);
+        // ...and a second sign seen from the same spot says where.
+        Vector2 other = new Vector2(7f, 2.1f), toOther = other - truth;
+        Assert.IsTrue(filter.AddSignObservation(PositionFilter.Heading(toOther), toOther.magnitude, 0.3f, other, normal));
         Assert.Less(Vector2.Distance(filter.Estimate, truth), 0.75f, $"estimate {filter.Estimate}");
     }
 

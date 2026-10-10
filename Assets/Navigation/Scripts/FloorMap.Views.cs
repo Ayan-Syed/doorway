@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 
 // What the map looks at (framing, following), and what it draws on top: the route, the pin and the user's puck.
 public partial class FloorMap
@@ -200,6 +201,30 @@ public partial class FloorMap
     {
         puck.SetActive(false);
         Layout();
+    }
+
+    // The marker's colour (the dot's fill and the disc under it) and its "?" badge: how sure the position is.
+    // Writes only what changed, so it can be called every frame (a day/night switch repaints the dot its usual way).
+    public void TintPuck(Color color, bool unknown)
+    {
+        if (puckFill != null && puckFill.color != color)
+            puckFill.color = color;
+        if (puckAccuracy != null && puckAccuracy.TryGetComponent(out Image disc))
+        {
+            Color tint = color;
+            tint.a = 0.15f;
+            if (disc.color != tint)
+                disc.color = tint;
+        }
+        if (puckUnknown != null && puckUnknown.activeSelf != unknown)
+            puckUnknown.SetActive(unknown);
+    }
+
+    // Whether a plan point is on screen.
+    public bool Shows(Vector2 point)
+    {
+        Vector2 at = ToWindow(point), half = Window.rect.size * 0.5f;
+        return Mathf.Abs(at.x) < half.x && Mathf.Abs(at.y) < half.y;
     }
 
     // The user's marker: an emoji on a disc, or the blue dot for null.

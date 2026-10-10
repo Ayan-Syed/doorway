@@ -25,6 +25,9 @@ public partial class NavigationScreen
     {
         if (FixAR())
             return;
+        // Standing at the door, back to it: that's where the position is, for the Localizer from now on too.
+        if (localizer != null && Application.isPlaying)
+            localizer.SnapToDoor(m_From);
         navigator.Begin(m_From, m_Destination);
         if (navigator.Route == null)
             return;
@@ -101,8 +104,15 @@ public partial class NavigationScreen
         }
 
         // Each with hysteresis in Navigator: a blink of lost tracking or a step across the warning line says nothing.
-        bool realign = navigator.ShouldRealign;
-        if (realign)
+        // Indoors, what the Localizer needs comes first: lost, a room number (or a door: the pill takes the tap);
+        // short of a view, the phone held up.
+        bool lost = m_Indoor.askForSign;
+        bool realign = navigator.ShouldRealign || lost;
+        if (lost)
+            SetStatus("Point at a room number, or tap to pick a door", PlaceStyle.Bad);
+        else if (m_Indoor.needsView)
+            SetStatus(NeedsViewMessage, PlaceStyle.Waiting);
+        else if (realign)
             SetStatus(RealignStatus, PlaceStyle.Bad);
         else if (navigator.TrackingLost)
             SetStatus(TrackingLostStatus, PlaceStyle.Bad);

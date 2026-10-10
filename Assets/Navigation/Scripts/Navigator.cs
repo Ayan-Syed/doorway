@@ -18,6 +18,10 @@ using UnityEngine.XR.ARFoundation;
 //   (AddSighting) pin it down. The plan root follows the estimate, so the band on the floor and the map dot agree.
 //   Without the walkable map the plan simply follows the AR camera, as it always has.
 //
+// With a Localizer indoors (it positions the user all the time, not only on a route), the filter is the
+// Localizer's: Navigator reads the position from it and only follows routes (progress, off-route, arrival,
+// rerouting), and a door start is a snap there.
+//
 // The other parts are Navigator.Corrections.cs (heading, floor, walls, signs, rerouting) and Navigator.Steps.cs
 // (what to do next).
 public partial class Navigator : MonoBehaviour
@@ -28,6 +32,8 @@ public partial class Navigator : MonoBehaviour
     public TextAsset walkable;
     [Tooltip("Reads room-number plates while guiding with the walls; each one it reads is a position fix. Optional.")]
     public SignReader signReader;
+    [Tooltip("Positions the user indoors all the time. With it, routes start from its position and plates go to it.")]
+    public Localizer localizer;
     public ARSession session;
     public Transform arCamera;
     public ARPlaneManager planeManager;
@@ -135,6 +141,23 @@ public partial class Navigator : MonoBehaviour
     /// <summary>Every sign text in the plan, for the sign reader to look for.</summary>
     public IEnumerable<string> SignTexts => m_SignTexts;
 
+    /// <summary>AR stays on whatever SetARActive says (the Localizer, indoors): the camera is how it knows where the
+    /// user is.</summary>
+    public bool KeepAR
+    {
+        get => m_KeepAR;
+        set
+        {
+            if (m_KeepAR == value)
+                return;
+            m_KeepAR = value;
+            ApplyAR();
+        }
+    }
+
+    /// <summary>The floor's height in the AR world (a guess until a floor plane is found).</summary>
+    public float FloorY => m_FloorY;
+
     /// <summary>AR waits while this is set (Android shows one permission dialog at a time, and ARCore asks for the
     /// camera as it starts).</summary>
     public bool HoldAR
@@ -190,7 +213,9 @@ public partial class Navigator : MonoBehaviour
     PoseLog m_Log;
     ARCameraManager m_CameraManager;
     int m_ARActive = -1;
-    bool m_WantAR, m_HoldAR, m_KeepVerticalPlanes;
+    bool m_WantAR, m_HoldAR, m_KeepVerticalPlanes, m_KeepAR;
+    // The filter is the Localizer's (it moves it each frame; Navigator only reads it and turns the plan root).
+    bool m_SharedFilter;
     bool m_CameraDenied;
     float m_ARSince, m_NextCameraPoll;
     bool m_PausedWhileGuiding;
@@ -237,7 +262,8 @@ public partial class Navigator : MonoBehaviour
                     m_SignTexts.Add(sign.text);
             }
         }
-        if (signReader != null)
+        // With a Localizer, plates are its to read.
+        if (signReader != null && localizer == null)
         {
             signReader.SetTexts(m_SignTexts);
             signReader.Sighted -= AddSighting;
@@ -261,7 +287,7 @@ public partial class Navigator : MonoBehaviour
 
     void ApplyAR()
     {
-        bool on = m_WantAR && !m_HoldAR;
+        bool on = (m_WantAR || m_KeepAR) && !m_HoldAR;
         int state = on ? 1 : 0;
         if (m_ARActive == state)
             return;
@@ -338,13 +364,30 @@ public partial class Navigator : MonoBehaviour
             pin.ApplyTheme(theme);
     }
 
-    // The user is outside the door, back to it. Lines the plan up with them and starts guiding.
+    // The user is outside the door, back to it. Lines the plan up with them and starts guiding. With a Localizer
+    // that's a snap at the door (unless it has just snapped there: the Line up screen snaps first), and the route
+    // follows the Localizer's filter from then on.
     public void Begin(PlanDoor from, PlanPlace to)
     {
         Route = PlanRoute(from, to);
         if (Route == null)
             return;
+        if (UsesLocalizer)
+        {
+            if (!localizer.JustSnappedTo(from))
+                localizer.SnapToDoor(from);
+            StartGuiding(Plan.NodePosition(from.node), from.node, to);
+            return;
+        }
         AlignTo(from);
+        StartGuiding(Plan.NodePosition(from.node), from.node, to);
+    }
+
+    bool UsesLocalizer => localizer != null && localizer.Filter != null && localizer.Indoors;
+
+    // Everything a route starts with, from a plan spot (the door, or where the Localizer puts the user).
+    void StartGuiding(Vector2 start, string from, PlanPlace to)
+    {
         Progress = 0f;
         OffRoute = 0f;
         IsOffRoute = false;
@@ -356,15 +399,44 @@ public partial class Navigator : MonoBehaviour
         m_PausedWhileGuiding = false;
         IsGuiding = true;
         HasArrived = false;
-        UserPosition = Plan.NodePosition(from.node);
+        UserPosition = start;
         RawPosition = UserPosition;
-        StartFilter(UserPosition);
-        SetReadingSigns(Walkable != null);   // a sighting only counts against the walls
+        m_Log?.End();
+        m_Log = null;
+        if (UsesLocalizer)
+        {
+            // The Localizer's filter, its log; the plan root goes straight to where it puts the user.
+            m_SharedFilter = true;
+            m_Filter = localizer.Filter;
+            UserPosition = localizer.Position;
+            PlaceFromFilter();
+            localizer.Note($"route {from} {to?.id}");
+        }
+        else
+        {
+            m_SharedFilter = false;
+            StartFilter(UserPosition);
+            SetReadingSigns(Walkable != null);   // a sighting only counts against the walls
+            m_Log = PoseLog.Begin(from, to?.id, m_BaseYaw, arCamera.position, UserPosition,
+                Plan.NodePosition(Route.door.node));
+        }
         ribbon.Show(Route, 0f);
         pin.Show(Route.place, Plan.NodePosition(Route.door.node), Route.door.Direction);
-        m_Log?.End();
-        m_Log = PoseLog.Begin(from.node, to?.id, m_BaseYaw, arCamera.position, UserPosition,
-            Plan.NodePosition(Route.door.node));
+    }
+
+    // The plan root put where the filter says, at once (a route from the Localizer's position starts here).
+    void PlaceFromFilter()
+    {
+        Vector2 at = m_Filter.Estimate, camera = m_Filter.Camera;
+        Quaternion rotation = Quaternion.Euler(0f, m_Filter.Yaw, 0f);
+        var spot = new Vector3(at.x, 0f, at.y);
+        planRoot.SetPositionAndRotation(new Vector3(camera.x, m_FloorY, camera.y) - rotation * spot, rotation);
+        planRoot.gameObject.SetActive(true);
+        m_BaseYaw = m_Filter.Yaw;
+        m_BasePosition = planRoot.position;
+        m_Anchor = new Vector3(camera.x, 0f, camera.y);
+        m_HeadingCorrection = 0f;
+        m_Trail.Clear();
     }
 
     // The sign reader needs walls ARCore has found, to measure how far a plate is.
@@ -374,6 +446,20 @@ public partial class Navigator : MonoBehaviour
             return;
         signReader.reading = on;
         KeepVerticalPlanes = on;
+    }
+
+    // A route from where the Localizer puts the user now, facing the way they face (the first step may be "Turn
+    // around"). False if there's no Localizer indoors, it isn't sure enough, or there's no way from there.
+    public bool BeginFrom(PlanPlace to)
+    {
+        if (!UsesLocalizer || localizer.State == LocalizerState.Lost || localizer.Spread > Localizer.RouteSpread)
+            return false;
+        Load();
+        Route = m_Router.FindRoute(localizer.Position, to);
+        if (Route == null)
+            return false;
+        StartGuiding(localizer.Position, "here", to);
+        return true;
     }
 
     // The pin goes with the plan root; it has no Hide of its own.
@@ -386,7 +472,9 @@ public partial class Navigator : MonoBehaviour
         m_LostTime = 0f;
         Route = null;
         m_Filter = null;
-        SetReadingSigns(false);
+        if (!m_SharedFilter)
+            SetReadingSigns(false);
+        m_SharedFilter = false;
         m_Log?.End();
         m_Log = null;
         if (ribbon != null)
@@ -395,24 +483,48 @@ public partial class Navigator : MonoBehaviour
         UpdatePlaneDetection();
     }
 
-    // Puts the door spot under the camera at floor height and turns the plan's "away from the door" direction
-    // onto where the phone faces.
-    void AlignTo(PlanDoor door)
+    // Standing at this door with your back to it: the door's spot, and the plan's yaw in the AR world that turns the
+    // plan's "away from the door" onto where the phone faces.
+    public void DoorPose(PlanDoor door, out Vector2 spot, out float yaw)
     {
-        Vector2 spot = Plan.NodePosition(door.node);
+        Load();
+        spot = Plan.NodePosition(door.node);
         Vector2 away = -door.Direction.normalized;                     // door.Direction points spot -> door
         Vector3 facing = FlatForward();
         // Both are compass headings (clockwise from +z), so the difference is the Unity yaw that turns plan "away"
         // onto world "facing".
-        float yaw = Mathf.Atan2(facing.x, facing.z) * Mathf.Rad2Deg - Mathf.Atan2(away.x, away.y) * Mathf.Rad2Deg;
-        Quaternion rotation = Quaternion.Euler(0f, yaw, 0f);
+        yaw = Mathf.Atan2(facing.x, facing.z) * Mathf.Rad2Deg - Mathf.Atan2(away.x, away.y) * Mathf.Rad2Deg;
+    }
 
-        Vector3 camera = arCamera.position;
-        m_FloorY = camera.y - EyeHeight;                                // a guess until a floor plane turns up
+    /// <summary>The camera's flat yaw in the AR world: degrees clockwise from world +z.</summary>
+    public float CameraYaw
+    {
+        get
+        {
+            Vector3 facing = FlatForward();
+            return Mathf.Atan2(facing.x, facing.z) * Mathf.Rad2Deg;
+        }
+    }
+
+    // A new floor guess under the camera, and a floor plane straight onto it if one's there (a snap, a door start).
+    public void ResetFloor()
+    {
+        m_FloorY = arCamera.position.y - EyeHeight;                     // a guess until a floor plane turns up
         m_FloorFound = false;
         m_FloorSettled = false;
         m_FloorSteady = 0;
         FindFloor(true);
+        UpdatePlaneDetection();
+    }
+
+    // Puts the door spot under the camera at floor height and turns the plan's "away from the door" direction
+    // onto where the phone faces.
+    void AlignTo(PlanDoor door)
+    {
+        DoorPose(door, out Vector2 spot, out float yaw);
+        Quaternion rotation = Quaternion.Euler(0f, yaw, 0f);
+        Vector3 camera = arCamera.position;
+        ResetFloor();
         planRoot.SetPositionAndRotation(
             new Vector3(camera.x, m_FloorY, camera.z) - rotation * new Vector3(spot.x, 0f, spot.y),
             rotation);
@@ -423,7 +535,6 @@ public partial class Navigator : MonoBehaviour
         m_Anchor = new Vector3(camera.x, 0f, camera.z);                 // the pivot for heading corrections
         m_HeadingCorrection = 0f;
         m_Trail.Clear();
-        UpdatePlaneDetection();
     }
 
     // Where the phone points, flattened onto the floor. Held flat (camera down), the top edge points ahead.
@@ -442,12 +553,21 @@ public partial class Navigator : MonoBehaviour
     void Update()
     {
         WatchCamera();
+        // Indoors the floor is wanted all the time (the depth scan keeps only points between floor and ceiling).
+        if (m_KeepAR && !IsGuiding)
+            FindFloor(false);
         if (!IsGuiding || Route == null)
             return;
         bool tracking = IsTracking;
         WatchTracking(tracking);
         FindFloor(false);
-        if (m_Filter != null)
+        if (m_SharedFilter && (localizer == null || !localizer.Indoors))
+            Stop();   // gone outdoors mid-route: nothing to guide by
+        if (!IsGuiding)
+            return;
+        if (m_SharedFilter)
+            FollowLocalizer();
+        else if (m_Filter != null)
             FollowFilter(tracking);
         else
             FollowCamera();
@@ -456,11 +576,14 @@ public partial class Navigator : MonoBehaviour
         OffRoute = offRoute;
         IsOffRoute = OffRoute > (IsOffRoute ? OffRouteClear : OffRouteWarning);
 
-        if (tracking)
+        // The Localizer's filter changes only by its own logged inputs (so a walk replays exactly): no route-based
+        // heading correction on it; its scan and walls correct the heading anyway.
+        if (tracking && !m_SharedFilter)
             CorrectHeading();
         else
             m_Trail.Clear();   // the pose can jump when tracking comes back; a trail across the jump isn't a walk
-        m_Log?.Frame(tracking, (int)ARSession.state, arCamera.position, arCamera.rotation, RawPosition,
+        if (!m_SharedFilter)
+            m_Log?.Frame(tracking, (int)ARSession.state, arCamera.position, arCamera.rotation, RawPosition,
             PlanHeading(FlatForward(), m_BaseYaw), UserPosition, UserHeading, m_Filter?.Spread ?? -1f,
             m_Filter?.Confidence ?? -1f, Progress, OffRoute, m_FloorY);
 
@@ -474,6 +597,8 @@ public partial class Navigator : MonoBehaviour
             HasArrived = true;
             ribbon.Hide();
             m_Log?.Note("arrived");
+            if (m_SharedFilter)
+                localizer.Note("arrived");
             Arrived?.Invoke();
         }
         else

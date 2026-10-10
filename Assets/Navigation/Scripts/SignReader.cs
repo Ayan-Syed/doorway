@@ -13,7 +13,10 @@ using UnityEngine.Scripting;
 
 // Reads room-number plates ("121", "107A") in the AR camera's frames while the user looks around, and reports each
 // as a SignSighting: a ray from where the camera was when the frame was taken, and a distance from how tall the
-// digits look. The reading is Google ML Kit's on-device Latin text recogniser with its model bundled in the app
+// digits look. The distance is measured where the phone can: ARCore depth at the text (when the Localizer has depth
+// on and the phone has it; this only reads it), else a detected wall along the ray, else estimated from the digits'
+// size. The reading is
+// Google ML Kit's on-device Latin text recogniser with its model bundled in the app
 // (Plugins/Android/DoorwayTextReader.androidlib), so it works offline. A few times a second one grey frame is
 // converted off the main thread and handed to Java, one frame at a time. A plate only counts when it's on the plan
 // and read in two of the last three frames, so one misread frame can't move the user. Does nothing in the editor,
@@ -22,16 +25,30 @@ public class SignReader : MonoBehaviour
 {
     public ARCameraManager cameraManager;
     public Camera arCamera;
+    [Tooltip("Optional: ARCore depth at the text, the best distance. Only read here: the Localizer turns depth on and off.")]
+    public AROcclusionManager occlusionManager;
+    [Tooltip("Optional: vertical planes (walls) to measure the distance against when there's no depth.")]
+    public ARPlaneManager planeManager;
     [Tooltip("Read plates while on. Off, it costs nothing.")]
     public bool reading;
+    [Tooltip("Frames read a second, at most.")]
+    public float rate = 3f;
     [Tooltip("Log each sighting, and every 10 s how long reading takes (logcat tag Unity).")]
     public bool logSightings = true;
 
-    /// <summary>How tall a plate's digits are, metres. An estimate: measure the real plates on site.</summary>
+    /// <summary>The plates' digit height before anything is measured, metres: an estimate.</summary>
     public const float PlateDigitHeight = 0.05f;
+    /// <summary>How tall the plates' digits are, metres, for distances from the digits' size. The Localizer can set it
+    /// once it has measured the real plates (from sightings with a measured distance).</summary>
+    public static float DigitHeight = PlateDigitHeight;
 
-    // One standard deviation of a distance, as a share of it: the digits' height is a guess and the boxes are loose.
-    const float DistanceSigmaShare = 0.3f;
+    // One standard deviation of a distance by source: depth is good to about 10 cm plus 5%; a wall plane to about
+    // 15 cm; the digits' size to 30%, as their height is a guess and the boxes are loose.
+    const float DepthSigma = 0.1f, DepthSigmaShare = 0.05f, PlaneSigma = 0.15f, DigitSigmaShare = 0.3f;
+    // A measured distance this many times off the digits' estimate (either way) hit something else: the digits win.
+    const float MeasuredAgreement = 3f;
+    // Depth pixels either side of the text's centre in the patch whose median is taken (5 x 5).
+    const int DepthPatch = 2;
     // Wider frames are shrunk to this before reading: plenty for a plate across a hallway, and quicker to read.
     const int MaxReadWidth = 1280;
     // The biggest CPU image to ask the camera for, in the sensor's own (landscape) orientation.
@@ -60,6 +77,12 @@ public class SignReader : MonoBehaviour
         public Vector2 focal, principal;
         /// <summary>Clockwise degrees that turn the image upright on the screen: 90 on most phones held upright.</summary>
         public int imageRotation;
+        /// <summary>The read image's size in pixels: places the text in the depth image.</summary>
+        public Vector2Int imageSize;
+        /// <summary>ARCore depth for the same frame, metres along the optical axis, row 0 at the top as in the camera
+        /// image (0 where unknown); null without depth.</summary>
+        public float[] depth;
+        public int depthWidth, depthHeight;
     }
 
     /// <summary>A word the text reader found: its text, its box in the image's pixels (y down), and its line.</summary>
@@ -104,26 +127,126 @@ public class SignReader : MonoBehaviour
     void Emit(string key, Rect box, Frame frame)
     {
         Vector3 local = ImageToCameraDirection(box.center, frame.focal, frame.principal, frame.imageRotation);
-        float distance = Distance(box, frame.focal, frame.imageRotation, local);
-        if (!(distance > 0f) || float.IsInfinity(distance))
+        float digits = Distance(box, frame.focal, frame.imageRotation, local);
+        if (!(digits > 0f) || float.IsInfinity(digits))
             return;
+        Vector3 direction = (frame.rotation * local).normalized;
         var sighting = new SignSighting
         {
             text = m_Texts[key],
             time = frame.time,
             cameraPosition = frame.position,
-            direction = (frame.rotation * local).normalized,
-            distance = distance,
-            distanceSigma = DistanceSigmaShare * distance,
+            direction = direction,
+            distance = digits,
+            distanceSigma = DigitSigmaShare * digits,
+            digitPixels = TextPixels(box, frame.imageRotation),
+            focalPixels = FocalPixels(frame.focal, frame.imageRotation),
         };
+        string source = "digits";
+        float depth = 0f;
+        if (frame.imageSize.x > 0 && frame.imageSize.y > 0)
+        {
+            var at = new Vector2(box.center.x / frame.imageSize.x, box.center.y / frame.imageSize.y);
+            depth = DepthToRange(DepthAt(frame.depth, frame.depthWidth, frame.depthHeight, at), local);
+        }
+        if (Agrees(depth, digits))
+        {
+            sighting.distance = depth;
+            sighting.distanceSigma = DepthSigma + DepthSigmaShare * depth;
+            sighting.distanceMeasured = true;
+            source = "depth";
+        }
+        else
+        {
+            float wall = PlaneRange(new Ray(frame.position, direction));
+            if (Agrees(wall, digits))
+            {
+                sighting.distance = wall;
+                sighting.distanceSigma = PlaneSigma;
+                sighting.distanceMeasured = true;
+                source = "wall";
+            }
+        }
         if (logSightings)
         {
             Vector2 at = CameraDirectionToViewport(local, frame.projection);
             double age = (Time.realtimeSinceStartupAsDouble - frame.time) * 1000.0;
-            Debug.Log($"[Navigation] Sign {sighting.text}: {distance:0.00} m, digits {TextPixels(box, frame.imageRotation):0} px " +
-                      $"tall, screen ({at.x:0.00}, {at.y:0.00}), {age:0} ms after capture.");
+            Debug.Log($"[Navigation] Sign {sighting.text}: {sighting.distance:0.00} m by {source} (digits say {digits:0.00} m, " +
+                      $"{sighting.digitPixels:0} px tall), screen ({at.x:0.00}, {at.y:0.00}), {age:0} ms after capture.");
         }
         Sighted?.Invoke(sighting);
+    }
+
+    static bool Agrees(float measured, float digits)
+    {
+        return measured > 0f && measured < digits * MeasuredAgreement && measured > digits / MeasuredAgreement;
+    }
+
+    // Metres along the ray to the nearest tracked vertical plane it crosses inside the plane's outline; 0 if none.
+    float PlaneRange(Ray ray)
+    {
+        if (planeManager == null)
+            return 0f;
+        float best = 0f;
+        foreach (ARPlane plane in planeManager.trackables)
+        {
+            if (plane.trackingState != TrackingState.Tracking || !plane.alignment.IsVertical())
+                continue;
+            if (!plane.infinitePlane.Raycast(ray, out float enter) || enter <= 0f || (best > 0f && enter >= best))
+                continue;
+            // Plane space: the plane's local x and z.
+            Vector3 local = plane.transform.InverseTransformPoint(ray.GetPoint(enter));
+            if (InsidePolygon(plane.boundary, new Vector2(local.x, local.z)))
+                best = enter;
+        }
+        return best;
+    }
+
+    static bool InsidePolygon(Unity.Collections.NativeArray<Vector2> polygon, Vector2 p)
+    {
+        if (!polygon.IsCreated || polygon.Length < 3)
+            return false;
+        bool inside = false;
+        for (int i = 0, j = polygon.Length - 1; i < polygon.Length; j = i++)
+        {
+            Vector2 a = polygon[i], b = polygon[j];
+            if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x)
+                inside = !inside;
+        }
+        return inside;
+    }
+
+    /// <summary>The median depth, metres, of the 5 x 5 patch of a depth image around a point given as a share of the
+    /// image's width and height (y down); unknown (0) pixels are left out. 0 if there's no depth there.</summary>
+    public static float DepthAt(float[] depth, int width, int height, Vector2 normalised)
+    {
+        if (depth == null || width <= 0 || height <= 0 || depth.Length < width * height)
+            return 0f;
+        int cx = Mathf.FloorToInt(normalised.x * width), cy = Mathf.FloorToInt(normalised.y * height);
+        if (cx < 0 || cy < 0 || cx >= width || cy >= height)
+            return 0f;
+        var patch = new List<float>((2 * DepthPatch + 1) * (2 * DepthPatch + 1));
+        for (int y = Mathf.Max(0, cy - DepthPatch); y <= Mathf.Min(height - 1, cy + DepthPatch); y++)
+        {
+            for (int x = Mathf.Max(0, cx - DepthPatch); x <= Mathf.Min(width - 1, cx + DepthPatch); x++)
+            {
+                float d = depth[y * width + x];
+                if (d > 0f && !float.IsInfinity(d))
+                    patch.Add(d);
+            }
+        }
+        if (patch.Count == 0)
+            return 0f;
+        patch.Sort();
+        int mid = patch.Count / 2;
+        return patch.Count % 2 == 1 ? patch[mid] : 0.5f * (patch[mid - 1] + patch[mid]);
+    }
+
+    /// <summary>Range along a ray from a depth, which is measured along the camera's optical axis: off-centre the
+    /// plate is further. cameraDirection is the unit ray in camera space. 0 when there's no depth.</summary>
+    public static float DepthToRange(float depth, Vector3 cameraDirection)
+    {
+        return depth > 0f && cameraDirection.z > 0f ? depth / cameraDirection.z : 0f;
     }
 
     /// <summary>Uppercase letters and digits only, with O read as 0 and I, l or | as 1 within a run of digits
@@ -281,15 +404,20 @@ public class SignReader : MonoBehaviour
     }
 
     /// <summary>Metres along the ray to a plate whose digits fill this box: the pinhole depth (focal length times
-    /// PlateDigitHeight over the digits' height in pixels, both along the text's upright axis), out along the ray,
+    /// DigitHeight over the digits' height in pixels, both along the text's upright axis), out along the ray,
     /// which is longer off-centre. Zero for an empty box.</summary>
     public static float Distance(Rect box, Vector2 focal, int imageRotation, Vector3 cameraDirection)
     {
         float pixels = TextPixels(box, imageRotation);
-        float f = Quarter(imageRotation) % 180 == 90 ? focal.x : focal.y;
-        if (pixels <= 0f || cameraDirection.z <= 0f)
+        if (pixels <= 0f)
             return 0f;
-        return f * PlateDigitHeight / pixels / cameraDirection.z;
+        return DepthToRange(FocalPixels(focal, imageRotation) * DigitHeight / pixels, cameraDirection);
+    }
+
+    /// <summary>The focal length along the upright text's height, in image pixels.</summary>
+    public static float FocalPixels(Vector2 focal, int imageRotation)
+    {
+        return Quarter(imageRotation) % 180 == 90 ? focal.x : focal.y;
     }
 
     /// <summary>The size a camera image is read at: at most MaxReadWidth wide, same shape, both sides even (NV21).</summary>
@@ -364,8 +492,6 @@ public class SignReader : MonoBehaviour
 
 #if UNITY_ANDROID && !UNITY_EDITOR
     const string ReaderClass = "com.ayansyed.doorway.DoorwayTextReader";
-    // Frames read a second, at most.
-    const float FramesPerSecond = 3f;
     // A frame not back from Java after this many seconds is given up on.
     const float GiveUpAfter = 5f;
     // Errors in a row before the reader stops for good: one bad frame is nothing, every frame failing is.
@@ -381,7 +507,8 @@ public class SignReader : MonoBehaviour
     Listener m_Listener;
     IntPtr m_Process;
     int m_ImageRotation, m_Errors;
-    bool m_WasReading, m_Broken, m_ConfigurationChosen, m_Converting, m_InFlight, m_PosePending, m_ShapeWarned;
+    bool m_WasReading, m_Broken, m_ConfigurationChosen, m_Converting, m_InFlight, m_PosePending, m_ShapeWarned, m_DepthShapeWarned, m_DepthSupportLogged;
+    float[] m_Depth;
     XRCpuImage.AsyncConversion m_Conversion;
     // The frame being converted or read: there's only ever one.
     Frame m_Frame;
@@ -500,7 +627,7 @@ public class SignReader : MonoBehaviour
     // Takes the newest camera image and starts converting it to grey off the main thread, noting where the camera was.
     void Capture()
     {
-        m_NextCapture = Time.unscaledTime + 1f / FramesPerSecond;
+        m_NextCapture = Time.unscaledTime + 1f / Mathf.Max(rate, 0.1f);
         if (cameraManager == null || arCamera == null || ARSession.state != ARSessionState.SessionTracking)
             return;
         if (!m_ConfigurationChosen)
@@ -532,8 +659,78 @@ public class SignReader : MonoBehaviour
             principal = Vector2.Scale(intrinsics.principalPoint, scale),
             imageRotation = m_ImageRotation,
         };
+        LogDepthSupport();
+        CopyDepth();
         TakePose();
         m_PosePending = true;
+    }
+
+    // Once, for the log: whether this phone can give depth at all (the Note 10 has no depth camera, so it would be
+    // ARCore's depth from motion). Known once the occlusion subsystem has started.
+    void LogDepthSupport()
+    {
+        if (m_DepthSupportLogged || occlusionManager == null)
+            return;
+        Supported support = occlusionManager.descriptor?.environmentDepthImageSupported ?? Supported.Unknown;
+        if (support == Supported.Unknown && occlusionManager.descriptor == null && ARSession.state != ARSessionState.SessionTracking)
+            return;
+        m_DepthSupportLogged = true;
+        Debug.Log($"[Navigation] Sign reader: environment depth {support} on this phone.");
+    }
+
+    // Keeps this frame's depth (a small image, 160 x 90 or so) until the words come back and say where to look.
+    void CopyDepth()
+    {
+        m_Frame.imageSize = m_ReadSize;
+        m_Frame.depth = null;
+        try
+        {
+            if (occlusionManager == null || !occlusionManager.TryAcquireEnvironmentDepthCpuImage(out XRCpuImage depth))
+                return;
+            using (depth)
+            {
+                bool millimetres = depth.format == XRCpuImage.Format.DepthUint16;
+                if (!millimetres && depth.format != XRCpuImage.Format.DepthFloat32)
+                    return;
+                // Placed by share of width and height, so it must frame the same view as the camera image.
+                if (!SameShape(depth.dimensions, m_ReadSize))
+                {
+                    if (!m_DepthShapeWarned)
+                        Debug.LogWarning($"[Navigation] Sign reader: depth image {depth.dimensions} isn't the camera image's shape; not using depth.");
+                    m_DepthShapeWarned = true;
+                    return;
+                }
+                int w = depth.width, h = depth.height;
+                if (m_Depth == null || m_Depth.Length != w * h)
+                    m_Depth = new float[w * h];
+                XRCpuImage.Plane plane = depth.GetPlane(0);
+                if (millimetres)
+                {
+                    NativeArray<ushort> values = plane.data.Reinterpret<ushort>(1);
+                    int stride = plane.rowStride / 2;
+                    for (int y = 0; y < h; y++)
+                        for (int x = 0; x < w; x++)
+                            m_Depth[y * w + x] = values[y * stride + x] * 0.001f;
+                }
+                else
+                {
+                    NativeArray<float> values = plane.data.Reinterpret<float>(1);
+                    int stride = plane.rowStride / 4;
+                    for (int y = 0; y < h; y++)
+                        for (int x = 0; x < w; x++)
+                            m_Depth[y * w + x] = values[y * stride + x];
+                }
+                m_Frame.depth = m_Depth;
+                m_Frame.depthWidth = w;
+                m_Frame.depthHeight = h;
+            }
+        }
+        catch (Exception e)
+        {
+            if (!m_DepthShapeWarned)
+                Debug.LogWarning($"[Navigation] Sign reader: no depth ({e.Message}).");
+            m_DepthShapeWarned = true;
+        }
     }
 
     static bool SameShape(Vector2Int a, Vector2Int b)

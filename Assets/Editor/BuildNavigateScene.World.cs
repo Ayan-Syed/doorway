@@ -5,7 +5,8 @@ using UnityEngine.UI;
 using UnityEngine.XR.ARFoundation;
 using static UIBuild;
 
-// What's drawn in AR: the Navigator, its plan root, the route on the floor and the destination pin.
+// What's in AR: the Navigator, its plan root, the route on the floor and the destination pin; and the Localizer
+// beside it, which positions the user indoors.
 public static partial class BuildNavigateScene
 {
     const string WalkablePath = DataFolder + "/ba1-floor1-walkable.bytes";
@@ -45,6 +46,21 @@ public static partial class BuildNavigateScene
         navigator.ribbon = ribbon;
         navigator.pin = CreatePin(planRoot, arCamera);
         return navigator;
+    }
+
+    // Indoor positioning, on the Navigator's object: the plan's walls for matching, ARCore's feature points for
+    // phones without depth, the step counter, and the plate reader the Navigator has. Made before the screen, which
+    // finds it.
+    static Localizer CreateLocalizer(Navigator navigator, ARPointCloudManager points)
+    {
+        var localizer = navigator.gameObject.AddComponent<Localizer>();
+        localizer.navigator = navigator;
+        localizer.walls = s_Walls;
+        localizer.pointClouds = points;
+        localizer.signReader = navigator.signReader;
+        localizer.steps = CreateStepCounter(navigator.gameObject);
+        navigator.localizer = localizer;
+        return localizer;
     }
 
     // A ring on the floor at the door, a pulse spreading from it, a beam of light, and a floating name tag.

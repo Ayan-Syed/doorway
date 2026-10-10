@@ -31,7 +31,9 @@ public partial class NavigationScreen
         if (m_Initialized)
             return;
         m_Initialized = true;
-        m_Panels = new[] { homePanel, routePanel, faceChip, guidePanel, arrivedPanel, floorMenu };
+        m_Panels = snapPanel != null
+            ? new[] { homePanel, routePanel, faceChip, guidePanel, arrivedPanel, floorMenu, snapPanel }
+            : new[] { homePanel, routePanel, faceChip, guidePanel, arrivedPanel, floorMenu };
 
         Theme.Set(themeName);
         navigator.Load();
@@ -67,11 +69,15 @@ public partial class NavigationScreen
         if (locate != null)
             locate.GetComponent<Button>().onClick.AddListener(OnLocate);
 
-        directionsButton.onClick.AddListener(() => ShowStart(m_Selected, true));   // true: GPS may pick the start
+        directionsButton.onClick.AddListener(OnDirections);   // indoors, straight to walking; outdoors, GPS picks the start
         placeClose.onClick.AddListener(ShowHome);
         routeBack.onClick.AddListener(Back);
         originButton.onClick.AddListener(() => ShowStart(m_Destination, false));
-        destinationButton.onClick.AddListener(() => ShowPlace(m_Destination));
+        destinationButton.onClick.AddListener(() =>
+        {
+            if (m_Destination != null)
+                ShowPlace(m_Destination);
+        });
         for (int i = 0; i < nearbyChips.Length; i++)
         {
             int chip = i;
@@ -120,6 +126,7 @@ public partial class NavigationScreen
         }
 
         FillHome();
+        WireIndoor();
         m_ShortName = ShortName(Plan.building);
         NameFloor();
         ShowPlanBuilding();
@@ -195,6 +202,7 @@ public partial class NavigationScreen
         }
         if (location != null)
             location.Changed -= OnLocationChanged;
+        UnwireIndoor();
     }
 
     // Back from another app: the phone may have switched between light and dark.

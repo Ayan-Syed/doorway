@@ -240,13 +240,19 @@ public partial class NavigationScreen
 
     // In on the floor or out over the campus: the subtitle, Go inside or Whole floor, and the floor button (only
     // inside) follow the map.
+    // Another building, once picked, stays the sheet's until the user looks away from it. The map flying there
+    // can pass over the floor's building zoomed in far enough to count as "in on the floor" (from the campus's
+    // middle to L3Harris it crosses BA1 at zoom 0.4): taking that for the user going inside put BA1's name back
+    // under the other building's snackbar.
     void UpdateIndoors(bool force)
     {
         bool indoors = map.Indoors;
+        if (m_Building != null && !force && !map.IsMoving && !map.Shows(m_Building.Spot))
+            ShowPlanBuilding();   // panned or zoomed away from it
         if (indoors != m_Indoors || force)
         {
             m_Indoors = indoors;
-            if (indoors)
+            if (indoors && (m_Building == null || force))
                 ShowPlanBuilding();   // in on the floor, the sheet is the floor's again
             if (m_Kind == null)
                 homeSubtitle.text = HomeSubtitle;

@@ -48,6 +48,10 @@ public partial class FloorMap : MonoBehaviour, IPointerDownHandler, IPointerUpHa
     public Image puckEmoji;
     [Tooltip("How far off the position may be: a disc on the floor, 100 x 100 at scale 1.")]
     public RectTransform puckAccuracy;
+    [Tooltip("The blue dot's fill: TintPuck colours it (and the disc) by how sure the position is.")]
+    public Image puckFill;
+    [Tooltip("A \"?\" badge on the marker, while the position is lost.")]
+    public GameObject puckUnknown;
     [Tooltip("The walls standing up off the floor, shown while the map is tilted.")]
     public WallMesh walls;
     [Tooltip("The campus round the building (Data/ucf-campus.bytes and .json); none for just the floor.")]
@@ -99,6 +103,10 @@ public partial class FloorMap : MonoBehaviour, IPointerDownHandler, IPointerUpHa
     public FloorPlan Plan => m_Plan;
     public float Rotation => m_Rotation;
     public CampusData Campus => m_Campus;
+    public float Zoom => m_Zoom;
+    // Where the map looks, and whether it's on its way somewhere it was sent (not a finger's drag or fling).
+    public Vector2 Center => m_Center;
+    public bool IsMoving => m_Animating;
 
     FloorPlan m_Plan;
     CampusData m_Campus;

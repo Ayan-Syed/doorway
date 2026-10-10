@@ -135,7 +135,7 @@ public static partial class BuildNavigateScene
         map.puckCone = beam.gameObject;
         RectTransform dot = Fixed("Dot", you, Center, Vector2.zero, new Vector2(50f, 50f) * s);
         Card(dot, Color.white, 25f * s, true);
-        Dot("Fill", dot, Center, Vector2.zero, 36f * s, s_T.primary);
+        map.puckFill = Dot("Fill", dot, Center, Vector2.zero, 36f * s, s_T.primary);
         map.puckDot = dot.gameObject;
         RectTransform avatar = Fixed("Avatar", you, Center, Vector2.zero, new Vector2(84f, 84f) * s);
         Card(avatar, Color.white, 42f * s, true);
@@ -146,6 +146,12 @@ public static partial class BuildNavigateScene
         avatar.gameObject.SetActive(false);
         map.puckAvatar = avatar.gameObject;
         map.puckEmoji = emoji;
+        // A "?" on the marker's shoulder while the position is lost (FloorMap.TintPuck).
+        RectTransform unknown = Fixed("Unknown", you, Center, new Vector2(30f, 30f) * s, new Vector2(40f, 40f) * s);
+        Card(unknown, s_T.onSurfaceVariant, 20f * s, true);
+        TextIn(Stretch("Mark", unknown), "?", s_Bold, Mathf.RoundToInt(30f * s), Color.white, TextAnchor.MiddleCenter);
+        unknown.gameObject.SetActive(false);
+        map.puckUnknown = unknown.gameObject;
         return map;
     }
 

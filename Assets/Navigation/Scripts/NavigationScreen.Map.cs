@@ -68,7 +68,7 @@ public partial class NavigationScreen
             case Step.Start:
             case Step.Align:
                 if (place != null && place.doors.Count > 0)
-                    ShowAlign(place, NearestDoor(place, point), false, null);
+                    StartFrom(place, NearestDoor(place, point), null);
                 else
                     Snack("Tap the room or entrance you're at");
                 break;

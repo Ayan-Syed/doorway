@@ -22,6 +22,21 @@ using UnityEngine;
 //   r,t,endx,endz                        rerouted (the destination's door may have changed)
 //   e,t,what                             arrived, realign <why>
 // t is seconds since the walk began (Time.realtimeSinceStartupAsDouble); metres and degrees throughout.
+//
+// The Localizer's logs (one per indoor session, from the snap to going outdoors) hold the raw inputs of its engine,
+// so ReplayEvaluator can run them again exactly (LocalizerEngine, the same code and seed):
+//   n,t,door,x,z,yaw,camx,camz           snap: the door spot, the plan's yaw in the AR world, the camera (world x, z)
+//   l,t / o,t                            relocalize asked / gone outdoors
+//   a,t,tracking,cx,cy,cz,yaw            each frame: tracking 0/1, the camera's world position and flat yaw
+//   d,t,source,n,x,z,...                 a depth scan (depth or points): n world (x, z) points, 2 decimals
+//   p,t,n,(cx,cz,dx,dz,nx,nz,length)...  the walls ARCore sees (vertical planes, flattened)
+//   s,t,text,camx,camz,bearing,range,sigma,measured,digitPixels,focalPixels,distance   a plate read
+//   m,t,compass / k,t,compass,length     the compass while tracking / a step (length 0: the usual)
+//   q,t,max                              the particle cap, lowered for the time budget
+//   c,t,door,x,z                         a checkpoint: the user says they're at this door (the truth)
+// and its outputs, for reading but not replayed:
+//   r,t,state,x,z,heading,spread,confidence,particles,walls   D,t,source,points,bestMean,hitShare,ms
+//   g,t,x,z,accuracy (GPS)               e,t,what (state changes, routes, sources)
 public sealed class PoseLog
 {
     public const string Folder = "walks";
@@ -74,6 +89,71 @@ public sealed class PoseLog
             Debug.LogWarning($"[Navigation] No walk log: {e.Message}");
             return null;
         }
+    }
+
+    // A Localizer log: no route, no 'b' row; every row comes through Row, Add and EndRow.
+    public static PoseLog Open(string what)
+    {
+        try
+        {
+            string folder = Path.Combine(Application.persistentDataPath, Folder);
+            Directory.CreateDirectory(folder);
+            Prune(folder);
+            string name = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+            string path = Path.Combine(folder, name + ".csv");
+            for (int n = 2; File.Exists(path); n++)
+                path = Path.Combine(folder, $"{name}-{n}.csv");
+            var log = new PoseLog(new StreamWriter(path, false, new UTF8Encoding(false), 64 * 1024));
+            log.m_Line.Append("# Doorway ").Append(what).Append(", ").Append(Application.version).Append('\n');
+            return log;
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[Navigation] No walk log: {e.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>Starts a row of this kind at time (Time.realtimeSinceStartupAsDouble).</summary>
+    public void Row(char kind, double time)
+    {
+        if (m_Writer == null)
+            return;
+        m_Line.Append(kind);
+        Number(time - m_Start, 3);
+    }
+
+    public void Add(double value, int decimals)
+    {
+        if (m_Writer != null)
+            Number(value, decimals);
+    }
+
+    public void Add(long value)
+    {
+        if (m_Writer != null)
+            Integer(value);
+    }
+
+    public void Add(string text)
+    {
+        if (m_Writer == null)
+            return;
+        m_Line.Append(',');
+        if (text == null)
+            return;
+        foreach (char c in text)
+            m_Line.Append(c == ',' || c == '\n' || c == '\r' ? ' ' : c);
+    }
+
+    /// <summary>Ends the row; writes the buffer out once a second.</summary>
+    public void EndRow()
+    {
+        if (m_Writer == null)
+            return;
+        m_Line.Append('\n');
+        if (Time.unscaledTime >= m_NextFlush)
+            Flush();
     }
 
     // Keeps the newest KeepFiles - 1, so with the new one there are KeepFiles. Names sort by time.

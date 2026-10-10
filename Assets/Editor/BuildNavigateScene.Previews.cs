@@ -101,6 +101,7 @@ public static partial class BuildNavigateScene
         readonly PlanDoor m_Door;
         readonly Route m_Route;
         readonly Vector2 m_Spot, m_Near, m_Outside;
+        readonly PlanPlace m_Entrance;
         readonly string m_Neighbour;
         string m_Folder;
         int m_Failed;
@@ -124,6 +125,7 @@ public static partial class BuildNavigateScene
             // Outside, out past an entrance's doors (the east one's, if there is one).
             PlanPlace exit = plan.places.Find(p => p.kind == "exit" && p.doors.Count > 0 && p.name.StartsWith("East"))
                              ?? plan.places.Find(p => p.kind == "exit" && p.doors.Count > 0);
+            m_Entrance = exit;
             m_Outside = exit != null
                 ? plan.NodePosition(exit.doors[0].node) + exit.doors[0].Direction.normalized * 14f
                 : m_Spot + new Vector2(0f, 80f);
@@ -287,6 +289,17 @@ public static partial class BuildNavigateScene
                 Look(m_Navigator.UserPosition, m_Navigator.UserHeading);
                 s.PreviewArrived(m_To);
             });
+
+            // Indoor positioning: the snap card at an entrance, the dot in each state a few metres down the
+            // hallway (halo as wide as the estimate is unsure), and the team's debug overlay.
+            Vector2 hallway = m_Route.PointAt(Mathf.Min(6f, m_Route.length / 2f));
+            float facing = Navigator.Heading(m_Route.DirectionAt(Mathf.Min(6f, m_Route.length / 2f)));
+            if (m_Entrance != null)
+                Capture("11-entrance-prompt", () => s.PreviewEntrance(m_Entrance));
+            Capture("12-indoor-converging", () => s.PreviewIndoor(LocalizerState.Converging, hallway, facing, 5f, true));
+            Capture("12b-indoor-localized", () => s.PreviewIndoor(LocalizerState.Localized, hallway, facing, 1.2f, false));
+            Capture("12c-indoor-lost", () => s.PreviewIndoor(LocalizerState.Lost, hallway, facing, 9f, false));
+            Capture("13-debug-overlay", () => s.PreviewDebug(hallway, facing, 4f));
             return m_Failed;
         }
 

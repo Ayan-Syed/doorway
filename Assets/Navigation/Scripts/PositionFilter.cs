@@ -2,70 +2,100 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-// Where the user is on the floor plan, from how the AR camera moves and where the walls are: a particle filter.
-// Each particle is a guess at three things: the user's plan position; how far the AR world is turned from the plan
-// beyond the start alignment (a heading offset, degrees); and how many plan metres one AR metre is (the drawing isn't
-// exactly to scale, and neither is ARCore). Every step the camera takes moves each particle its own way, and a step
-// that crosses a wall kills the particle. So a wrong heading dies out within a few metres of hallway, a wrong scale
-// at the next corner, and what's left agrees with the building. Room-number signs read by the camera weigh the
-// particles by how well each one explains the sighting. Plain C#, so the tests can walk it without Unity running.
+// Where the user is on the floor plan: Monte Carlo localization (Dellaert, Fox, Burgard & Thrun, ICRA 1999), the
+// particle filter robots use to find themselves on a map. Each particle is a guess at three things: the user's plan
+// position; how far the AR world is turned from the plan beyond the start alignment (a heading offset, degrees);
+// and how many plan metres one AR metre is (the drawing isn't exactly to scale, and neither is ARCore).
 //
+// - Motion: ARCore's pose deltas through the odometry motion model (Thrun, Burgard & Fox, Probabilistic Robotics,
+//   2005, §5.4, Table 5.6), each particle moving its own way; a step that crosses a wall kills the particle.
+// - Measurements weigh the particles: depth scans and walls ARCore sees (Reweight), room-number signs
+//   (AddSignObservation), and steps counted while the camera can't track (StepBlind).
+// - Resampling: the low-variance sampler (Probabilistic Robotics, Table 4.4), only when the effective number of
+//   particles falls under half. The number of particles adapts by KLD-sampling (Fox, IJRR 2003): few while the
+//   cloud is tight, many while it's spread out. Augmented MCL (Probabilistic Robotics, Table 8.3) injects random
+//   particles, from the walkable floor or round a sign just read, when measurements fit worse than they used to:
+//   that's how a filter that settled in the wrong place (the kidnapped robot) finds itself again.
+//
+// Plain C# with its own seeded random numbers, so a walk replayed from its log runs exactly as it did on the phone.
 // Plan and world: a world direction (x, z) turns into a plan direction by the plan's yaw, BaseYaw + the heading
 // offset: the Unity yaw (clockwise from above) Navigator gives the plan root.
 public sealed class PositionFilter
 {
     public const int DefaultCount = 300;
-    /// <summary>Camera travel gathered into one step, metres. The noise is per metre walked, so steps of one length
-    /// keep the frame rate out of it, and the walls are checked a few times a second, not every frame.</summary>
+    /// <summary>Camera travel gathered into one motion update, metres: the noise is per metre walked, so steps of
+    /// one length keep the frame rate out of it, and walls are checked a few times a second, not every frame.</summary>
     public const float Step = 0.25f;
-    /// <summary>Position noise: metres per metre walked, one standard deviation on each axis.</summary>
-    public const float PositionNoise = 0.05f;
+    // The odometry motion model's α1..α4 (Probabilistic Robotics, Table 5.6), for ARCore's visual-inertial odometry:
+    // rotation noise from rotation and from translation (rad² per rad², rad² per m²), translation noise from
+    // translation and from rotation (m² per m², m² per rad²). ARCore's local motion is good; its slow drift is the
+    // heading offset's and the scale's own random walk below.
+    const float Alpha1 = 0.003f, Alpha2 = 0.04f, Alpha3 = 0.0025f, Alpha4 = 0.0005f;
     /// <summary>Heading offset noise: degrees per square root of a metre walked (ARCore's yaw drifts slowly).</summary>
     public const float HeadingNoise = 0.4f;
     /// <summary>Scale noise: per square root of a metre walked.</summary>
     public const float ScaleNoise = 0.004f;
     /// <summary>Standing with your back to a door is rarely more than 15 degrees off square, and ARCore drifts a few
-    /// degrees a building: more than this is a wrong match, not a correction.</summary>
+    /// degrees a building: more than this is a wrong match, not a correction (until the filter is lost).</summary>
     public const float MaxHeadingOffset = 30f;
     public const float MinScale = 0.9f, MaxScale = 1.1f;
     /// <summary>The camera moving further than this in one frame while tracking is ARCore relocalizing, not a walk.</summary>
     public const float JumpDistance = 1f;
 
-    // How unsure the start is: the scale, before any corner has said otherwise.
+    // KLD-sampling (Fox, IJRR 2003): error bound ε and confidence 1 - δ (its upper quantile z), on bins of
+    // 0.25 m x 0.25 m x 10 degrees.
+    const float KldEpsilon = 0.05f, KldQuantile = 2.326f;   // δ = 0.01
+    const float BinSize = 0.25f, BinDegrees = 10f;
+    // Augmented MCL's averages of the measurement likelihood: slow and fast (α_slow << α_fast, per update).
+    const float AlphaSlow = 0.005f, AlphaFast = 0.1f;
+    // At most this share of a resample is injected, and only once the slow average has seen this many updates.
+    const float MaxInjection = 0.25f;
+    const int InjectAfter = 20;
+
     const float StartScaleSpread = 0.03f;
-    // Back from lost tracking: a gap up to this is taken as walked (with double noise); more, and the cloud spreads.
+    // Roughening (Gordon, Salmond & Smith, IEE Proc. F, 1993): a little jitter after each resample, so copies of one
+    // particle spread out again, and after each measurement update (Reweight), so a cloud that has drawn tight on a
+    // wrong heading while the phone stands still (no motion noise, no resample) can still slide to the right one.
+    // The heading jitter follows the cloud's own heading spread, between these bounds.
+    const float RoughenPosition = 0.03f, RoughenHeading = 0.75f, RoughenScale = 0.002f;
+    const float UpdateRoughenPosition = 0.02f, MinUpdateRoughen = 0.5f, MaxUpdateRoughen = 2f, RoughenShare = 0.5f;
     const float MaxRegainStep = 5f;
     const float RegainSpread = 1.5f, RegainHeadingSpread = 6f;
     const float JumpSpread = 0.5f, JumpHeadingSpread = 3f;
-    // Every particle hit a wall: start again round the last estimate, wider each time in a row.
     const float RecoverSpread = 1f, MaxRecoverSpread = 6f, RecoverHeadingSpread = 8f;
-    // Steps without a wipe-out before the wipe-outs in a row count from zero again.
     const int SettleSteps = 8;
     // Wipe-outs are counted over this many metres walked: on a walk started where the filter was told, they don't
     // happen at all; started at the wrong door, they come every few metres.
-    const float RecentWalk = 15f;
-    // Resample when the effective number of particles falls under this share of them.
+    const float RecentWalk = 30f;
     const float ResampleBelow = 0.5f;
     // Sightings: bearing noise on top of the particles' own headings, and the least range noise believed.
     const float BearingSigma = 6f;
     const float MinRangeSigma = 0.25f;
-    // A sighting no particle can explain is put down to a misread while the filter is this sure, unless it's the
-    // second such sighting in a row: then the filter is the one that's wrong, and it starts again from the sign.
+    // A sighting no particle can explain is a misread while the filter is this sure, unless it's the second in a
+    // row: then the filter is the one that's wrong, and it starts again from the sign.
     const float TrustAbove = 0.5f;
-    const float NewFixSpread = 0.3f, NewFixHeadingSpread = 4f;
+    const float NewFixHeadingSpread = 4f;
     // Line of sight to a sign is checked to a point this far out from its wall (the wall itself isn't walkable).
     static readonly float[] s_StandOffs = { 0.3f, 0.5f, 0.8f };
-    // Confidence: the share of the weight within this of the estimate.
+    // Starting from a sign: positions on the ring at the measured range in front of the plate, within this many
+    // degrees of square (plates are read from the hallway, rarely more side-on than this).
+    const float RingFan = 75f;
+    // Walking blind (steps, no camera): back with tracking, the gap ARCore reports isn't walked again, only loosened.
+    const float BlindRegainSpread = 0.4f, BlindRegainHeadingSpread = 3f;
     const float NearEstimate = 1f;
     const int SeedTries = 12;
 
     readonly Walkable m_Walkable;
-    readonly int m_Count;
+    readonly int m_Capacity;
+    int m_Count;
     Vector2[] m_Position, m_SparePosition;
     float[] m_Heading, m_SpareHeading;
     float[] m_Scale, m_SpareScale;
     readonly float[] m_Weight;
     readonly float[] m_Likelihood;
+    readonly float[] m_Distance;
+    readonly int[] m_Order;
+    readonly HashSet<long> m_Bins = new HashSet<long>();
     readonly List<Vector2> m_StandOff = new List<Vector2>();
     readonly List<bool> m_HasStandOff = new List<bool>();
     readonly System.Random m_Random;
@@ -73,32 +103,42 @@ public sealed class PositionFilter
     float m_SpareGaussian;
 
     Vector2 m_Camera;
-    bool m_Lost;
+    float m_CameraYaw = float.NaN;
+    bool m_Lost, m_Blind;
     int m_GoodSteps;
     int m_Contradictions;
     float m_Walked;
     readonly float[] m_RecoveredAt = { float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity };
+    int m_Updates;
+
+    // The sign hypothesis random particles are drawn round while it's set (Augmented MCL's injection, biased).
+    readonly List<Vector2> m_RingLandmarks = new List<Vector2>();
+    readonly List<Vector2> m_RingNormals = new List<Vector2>();
+    float m_RingBearing, m_RingRange, m_RingSigma;
 
     /// <summary>The plan's yaw that Begin set: the offsets are on top of it.</summary>
     public float BaseYaw { get; private set; }
-    /// <summary>The camera's world (x, z) at the last step: the estimate is where it was then.</summary>
+    /// <summary>How far, degrees, the heading offsets may go either way: MaxHeadingOffset from a door start, 180 (any
+    /// heading) once lost.</summary>
+    public float HeadingLimit { get; private set; } = MaxHeadingOffset;
+    /// <summary>The camera's world (x, z) at the last motion update: the estimate is where it was then.</summary>
     public Vector2 Camera => m_Camera;
-    /// <summary>The user's plan position at the last step; always on walkable floor when there's a walkable map.</summary>
+    /// <summary>The user's plan position at the last update; always on walkable floor when there's a walkable map.</summary>
     public Vector2 Estimate { get; private set; }
     public float HeadingOffset { get; private set; }
     public float Scale { get; private set; } = 1f;
     /// <summary>The plan's yaw as the filter sees it: BaseYaw + HeadingOffset.</summary>
     public float Yaw => BaseYaw + HeadingOffset;
-    /// <summary>How far the particles are spread round the estimate, metres (root mean square).</summary>
+    /// <summary>How far the particles are spread round their mean, metres (root mean square).</summary>
     public float Spread { get; private set; }
     /// <summary>0 to 1: the share of the particles' weight within a metre of the estimate.</summary>
     public float Confidence { get; private set; }
-    /// <summary>Times every particle hit a wall and the filter started again round its last estimate.</summary>
+    /// <summary>The heading offsets' circular standard deviation, degrees.</summary>
+    public float HeadingSpread { get; private set; }
     public int Recoveries { get; private set; }
-    /// <summary>Those restarts with no settled stretch between them (each restart spreads wider).</summary>
     public int RecoveriesInARow { get; private set; }
-    /// <summary>Restarts in the last RecentWalk metres walked: two or more, and the walk doesn't fit the building
-    /// from where the filter thinks it started (the wrong door, or a plan turned too far to correct).</summary>
+    /// <summary>Wipe-outs (every particle in a wall) in the last RecentWalk metres walked: two or more, and the walk
+    /// doesn't fit the building from where the filter thinks it started.</summary>
     public int RecentRecoveries
     {
         get
@@ -112,47 +152,99 @@ public sealed class PositionFilter
             return n;
         }
     }
+    /// <summary>Particles in use now.</summary>
     public int Count => m_Count;
+    /// <summary>The most particles this filter can hold.</summary>
+    public int Capacity => m_Capacity;
+    /// <summary>KLD-sampling on: the count moves between MinCount and MaxCount with how spread the cloud is.</summary>
+    public bool Adaptive { get; set; }
+    public int MinCount { get; set; } = 100;
+    int m_MaxCount;
+    /// <summary>The most particles KLD-sampling may use: lowered when an update takes too long on the phone.</summary>
+    public int MaxCount
+    {
+        get => m_MaxCount;
+        set => m_MaxCount = Mathf.Clamp(value, 1, m_Capacity);
+    }
+    /// <summary>Augmented MCL's slow and fast averages of the measurement likelihood.</summary>
+    public float SlowAverage { get; private set; }
+    public float FastAverage { get; private set; }
+    /// <summary>Random particles may be injected. Off while the filter is sure of itself: in a building of look-alike
+    /// hallways a random particle can fit one scan by chance, and a sure filter would be hijacked by it. The
+    /// Localizer allows it once lost (where Probabilistic Robotics' Table 8.3 allows it always).</summary>
+    public bool AllowInjection { get; set; } = true;
+    /// <summary>The share of the next resample to inject at random: 1 - fast / slow, when measurements have been
+    /// fitting worse lately than over the long run.</summary>
+    public float InjectionShare =>
+        !AllowInjection ? 0f
+        : Mathf.Max(MinimumInjection, m_Updates >= InjectAfter && SlowAverage > 0f
+            ? Mathf.Clamp(1f - FastAverage / SlowAverage, 0f, MaxInjection) : 0f);
+    /// <summary>Injected at every resample regardless of the averages (while a sign contradicts the filter, its rings
+    /// get a few particles to prove themselves against the scan and the walls).</summary>
+    public float MinimumInjection { get; set; }
+    /// <summary>A sign hypothesis is set (SetRing): injected particles go round it.</summary>
+    public bool HasRing => m_RingLandmarks.Count > 0;
+    /// <summary>Particles injected at random so far.</summary>
+    public int Injected { get; private set; }
 
-    public PositionFilter(Walkable walkable, int count = DefaultCount, int seed = 1)
+    public PositionFilter(Walkable walkable, int count = DefaultCount, int seed = 1, int capacity = 0)
     {
         m_Walkable = walkable;
         m_Count = Mathf.Max(1, count);
-        m_Position = new Vector2[m_Count];
-        m_SparePosition = new Vector2[m_Count];
-        m_Heading = new float[m_Count];
-        m_SpareHeading = new float[m_Count];
-        m_Scale = new float[m_Count];
-        m_SpareScale = new float[m_Count];
-        m_Weight = new float[m_Count];
-        m_Likelihood = new float[m_Count];
+        m_Capacity = Mathf.Max(m_Count, capacity);
+        m_MaxCount = m_Capacity;
+        m_Position = new Vector2[m_Capacity];
+        m_SparePosition = new Vector2[m_Capacity];
+        m_Heading = new float[m_Capacity];
+        m_SpareHeading = new float[m_Capacity];
+        m_Scale = new float[m_Capacity];
+        m_SpareScale = new float[m_Capacity];
+        m_Weight = new float[m_Capacity];
+        m_Likelihood = new float[m_Capacity];
+        m_Distance = new float[m_Capacity];
+        m_Order = new int[m_Capacity];
         m_Random = new System.Random(seed);
     }
 
     // The walk starts: the user stands at plan point `at` (on walkable floor, or the nearest that is), and the camera
     // is at world (x, z) `camera`, with the plan turned by baseYaw.
-    public void Reset(Vector2 at, Vector2 camera, float baseYaw, float positionSpread = 0.5f, float headingSpread = 10f)
+    public void Reset(Vector2 at, Vector2 camera, float baseYaw, float positionSpread = 0.5f, float headingSpread = 10f,
+        float headingLimit = MaxHeadingOffset) => Reset(at, camera, baseYaw, positionSpread, headingSpread, headingLimit, false);
+
+    // uniformHeading: offsets spread evenly over ±headingSpread instead of normally (a snap: a door can be 25 degrees
+    // off square, and the truth then needs particles near it from the start, not 2.5 deviations out).
+    public void Reset(Vector2 at, Vector2 camera, float baseYaw, float positionSpread, float headingSpread,
+        float headingLimit, bool uniformHeading)
     {
         BaseYaw = baseYaw;
+        HeadingLimit = Mathf.Clamp(headingLimit, 0f, 180f);
         m_Camera = camera;
+        m_CameraYaw = float.NaN;
         m_Lost = false;
-        m_GoodSteps = 0;
+        m_Blind = false;
         m_Contradictions = 0;
         m_Walked = 0f;
-        for (int i = 0; i < m_RecoveredAt.Length; i++)
-            m_RecoveredAt[i] = float.NegativeInfinity;
         Recoveries = 0;
-        RecoveriesInARow = 0;
+        ForgetRecoveries();
+        ResetAverages();
+        ClearRing();
         Vector2 centre = OnFloor(at, 3f, at);
         for (int i = 0; i < m_Count; i++)
-            Seed(i, centre, positionSpread, 0f, headingSpread, 1f, StartScaleSpread);
+        {
+            Seed(i, centre, positionSpread, 0f, uniformHeading ? 0f : headingSpread, 1f, StartScaleSpread);
+            if (uniformHeading)
+                m_Heading[i] = Bound(((i + (float)m_Random.NextDouble()) / m_Count * 2f - 1f) * headingSpread);
+        }
         Uniform();
         UpdateEstimate();
     }
 
-    // Each frame: where the AR camera is now, and whether ARCore is tracking. The filter steps once the camera has
-    // moved Step; untracked poses are ignored, and the walk picks up from the next tracked one.
-    public void Follow(Vector2 camera, bool tracking)
+    public void Follow(Vector2 camera, bool tracking) => Follow(camera, float.NaN, tracking);
+
+    // Each frame: where the AR camera is now (world x, z), which way it faces (world yaw, degrees; NaN if not known),
+    // and whether ARCore is tracking. A motion update once the camera has moved Step; untracked poses are ignored, and
+    // the walk picks up from the next tracked one.
+    public void Follow(Vector2 camera, float cameraYaw, bool tracking)
     {
         if (!tracking)
         {
@@ -161,6 +253,15 @@ public sealed class PositionFilter
         }
         Vector2 move = camera - m_Camera;
         float length = move.magnitude;
+        if (m_Lost && m_Blind)
+        {
+            // Steps moved the cloud while ARCore was lost: its pose meanwhile isn't a walk to take again.
+            m_Lost = m_Blind = false;
+            Diffuse(BlindRegainSpread, BlindRegainHeadingSpread);
+            m_Camera = camera;
+            m_CameraYaw = cameraYaw;
+            return;
+        }
         if (m_Lost)
         {
             m_Lost = false;
@@ -169,11 +270,17 @@ public sealed class PositionFilter
             {
                 Diffuse(RegainSpread, RegainHeadingSpread);
                 m_Camera = camera;
+                m_CameraYaw = cameraYaw;
             }
             else if (length >= Step)
             {
-                Predict(move, 2f);
+                // In Step-long pieces: the motion model's noise is for a step, and one long jump would turn every
+                // particle's direction by far more than walking it does.
+                int pieces = Mathf.CeilToInt(length / Step);
+                for (int k = 0; k < pieces; k++)
+                    Predict(move / pieces, 2f, float.NaN, float.NaN);
                 m_Camera = camera;
+                m_CameraYaw = cameraYaw;
             }
             return;
         }
@@ -182,12 +289,14 @@ public sealed class PositionFilter
             // The pose jumped, the user didn't: keep the cloud where it is, a little looser.
             Diffuse(JumpSpread, JumpHeadingSpread);
             m_Camera = camera;
+            m_CameraYaw = cameraYaw;
             return;
         }
         if (length >= Step)
         {
-            Predict(move, 1f);
+            Predict(move, 1f, m_CameraYaw, cameraYaw);
             m_Camera = camera;
+            m_CameraYaw = cameraYaw;
         }
     }
 
@@ -209,20 +318,47 @@ public sealed class PositionFilter
     public void ShiftHeading(float degrees)
     {
         for (int i = 0; i < m_Count; i++)
-            m_Heading[i] = Mathf.Clamp(m_Heading[i] + degrees, -MaxHeadingOffset, MaxHeadingOffset);
+            m_Heading[i] = Bound(m_Heading[i] + degrees);
         UpdateEstimate();
     }
 
-    // One step of the camera, worldMove metres in world (x, z). noise scales the usual noise.
-    public void Predict(Vector2 worldMove, float noise = 1f)
+    /// <summary>Particles to use from the next Reset (a snap starts with a few hundred; KLD-sampling takes it on).</summary>
+    public void SetCount(int count) => m_Count = Mathf.Clamp(count, 1, m_Capacity);
+
+    /// <summary>Lost: any heading may be the right one from here on.</summary>
+    public void FreeHeading() => HeadingLimit = 180f;
+
+    /// <summary>A fresh start (a snap, or a sign that placed the user): wipe-outs before it don't count.</summary>
+    public void ForgetRecoveries()
     {
-        float length = worldMove.magnitude;
-        if (length <= 0f)
+        for (int i = 0; i < m_RecoveredAt.Length; i++)
+            m_RecoveredAt[i] = float.NegativeInfinity;
+        RecoveriesInARow = 0;
+        m_GoodSteps = 0;
+    }
+
+    public void Predict(Vector2 worldMove, float noise = 1f) => Predict(worldMove, noise, float.NaN, float.NaN);
+
+    // One motion update: the camera moved worldMove (world x, z), turning from yawFrom to yawTo (world degrees, NaN
+    // if not known). The odometry motion model (Probabilistic Robotics, §5.4, sample_motion_model_odometry): the move
+    // as a turn (rot1), a translation and a turn (rot2), each with noise from the α's; noise scales them all.
+    public void Predict(Vector2 worldMove, float noise, float yawFrom, float yawTo)
+    {
+        float trans = worldMove.magnitude;
+        if (trans <= 0f)
             return;
-        m_Walked += length;
-        float positionSigma = PositionNoise * length * noise;
-        float headingSigma = HeadingNoise * Mathf.Sqrt(length) * noise;
-        float scaleSigma = ScaleNoise * Mathf.Sqrt(length) * noise;
+        m_Walked += trans;
+        float travel = Heading(worldMove) * Mathf.Deg2Rad;
+        float rot1 = 0f, rot2 = 0f;
+        if (!float.IsNaN(yawFrom) && !float.IsNaN(yawTo))
+        {
+            rot1 = Mathf.DeltaAngle(yawFrom, travel * Mathf.Rad2Deg) * Mathf.Deg2Rad;
+            rot2 = Mathf.DeltaAngle(yawFrom + rot1 * Mathf.Rad2Deg, yawTo) * Mathf.Deg2Rad;
+        }
+        float rotSigma = Mathf.Sqrt(Alpha1 * rot1 * rot1 + Alpha2 * trans * trans) * noise;
+        float transSigma = Mathf.Sqrt(Alpha3 * trans * trans + Alpha4 * (rot1 * rot1 + rot2 * rot2)) * noise;
+        float headingSigma = HeadingNoise * Mathf.Sqrt(trans) * noise;
+        float scaleSigma = ScaleNoise * Mathf.Sqrt(trans) * noise;
         Vector2 expected = Estimate + ToPlan(worldMove, Yaw) * Scale;
 
         float alive = 0f;
@@ -230,15 +366,18 @@ public sealed class PositionFilter
         {
             if (m_Weight[i] <= 0f)
                 continue;   // dead until the next resample replaces it
+            float direction = travel + Gaussian() * rotSigma;
+            float length = Mathf.Max(0f, trans + Gaussian() * transSigma);
+            var noisy = new Vector2(Mathf.Sin(direction), Mathf.Cos(direction)) * length;
             Vector2 from = m_Position[i];
-            Vector2 to = from + ToPlan(worldMove, BaseYaw + m_Heading[i]) * m_Scale[i] + Gaussian2() * positionSigma;
+            Vector2 to = from + ToPlan(noisy, BaseYaw + m_Heading[i]) * m_Scale[i];
             if (m_Walkable != null && !m_Walkable.SegmentClear(from, to))
             {
                 m_Weight[i] = 0f;
                 continue;
             }
             m_Position[i] = to;
-            m_Heading[i] = Mathf.Clamp(m_Heading[i] + Gaussian() * headingSigma, -MaxHeadingOffset, MaxHeadingOffset);
+            m_Heading[i] = Bound(m_Heading[i] + Gaussian() * headingSigma);
             m_Scale[i] = Mathf.Clamp(m_Scale[i] + Gaussian() * scaleSigma, MinScale, MaxScale);
             alive += m_Weight[i];
         }
@@ -255,6 +394,45 @@ public sealed class PositionFilter
         UpdateEstimate();
     }
 
+    // A step counted while ARCore can't track (the phone lowered or covered): map-constrained pedestrian dead
+    // reckoning (Woodman & Harle, UbiComp 2008). Every particle moves planStep (plan metres), give or take
+    // lengthSigma of its length and headingSigma degrees of its direction, and walls kill as usual.
+    public void StepBlind(Vector2 planStep, float lengthSigma, float headingSigma)
+    {
+        float length = planStep.magnitude;
+        if (length <= 0f)
+            return;
+        m_Blind = true;
+        m_Walked += length;
+        Vector2 direction = planStep / length;
+        float alive = 0f;
+        for (int i = 0; i < m_Count; i++)
+        {
+            if (m_Weight[i] <= 0f)
+                continue;
+            float turn = Gaussian() * headingSigma * Mathf.Deg2Rad;
+            float c = Mathf.Cos(turn), s = Mathf.Sin(turn);
+            var turned = new Vector2(direction.x * c + direction.y * s, -direction.x * s + direction.y * c);
+            Vector2 from = m_Position[i];
+            Vector2 to = from + turned * Mathf.Max(0.1f, length + Gaussian() * lengthSigma);
+            if (m_Walkable != null && !m_Walkable.SegmentClear(from, to))
+            {
+                m_Weight[i] = 0f;
+                continue;
+            }
+            m_Position[i] = to;
+            alive += m_Weight[i];
+        }
+        if (alive <= 0f)
+        {
+            Recover(Estimate + planStep);
+            return;
+        }
+        Normalize(alive);
+        ResampleIfNeeded();
+        UpdateEstimate();
+    }
+
     // Loosens the cloud where it stands (after a pose jump, or tracking coming back from far away). A particle
     // that would land in a wall stays put: nobody walked, so nothing is learnt from it.
     public void Diffuse(float positionSpread, float headingSpread)
@@ -266,14 +444,173 @@ public sealed class PositionFilter
             Vector2 to = m_Position[i] + Gaussian2() * positionSpread;
             if (m_Walkable == null || m_Walkable.IsWalkable(to))
                 m_Position[i] = to;
-            m_Heading[i] = Mathf.Clamp(m_Heading[i] + Gaussian() * headingSpread, -MaxHeadingOffset, MaxHeadingOffset);
+            m_Heading[i] = Bound(m_Heading[i] + Gaussian() * headingSpread);
         }
         UpdateEstimate();
     }
 
+    // Spreads the cloud over walkable floor within radius of centre (the user asked to find themselves again): any
+    // heading, or the present one give or take a little.
+    public void Scatter(Vector2 centre, float radius, bool anyHeading)
+    {
+        if (anyHeading)
+            FreeHeading();
+        if (Adaptive)
+            m_Count = m_MaxCount;
+        for (int i = 0; i < m_Count; i++)
+        {
+            Vector2 at = Estimate;
+            for (int t = 0; t < SeedTries * 2; t++)
+            {
+                float angle = (float)m_Random.NextDouble() * 2f * Mathf.PI;
+                float r = radius * Mathf.Sqrt((float)m_Random.NextDouble());
+                Vector2 c = centre + new Vector2(Mathf.Sin(angle), Mathf.Cos(angle)) * r;
+                if (m_Walkable == null || m_Walkable.IsWalkable(c))
+                {
+                    at = c;
+                    break;
+                }
+            }
+            m_Position[i] = at;
+            m_Heading[i] = anyHeading ? RandomHeading() : Bound(HeadingOffset + Gaussian() * RecoverHeadingSpread);
+            m_Scale[i] = Mathf.Clamp(1f + Gaussian() * StartScaleSpread, MinScale, MaxScale);
+        }
+        Uniform();
+        ForgetRecoveries();
+        ResetAverages();
+        UpdateEstimate();
+    }
+
+    // Another signal's verdict: each particle's log-likelihood. Weights are scaled by e^(ll - max), the span held to
+    // maxSpan so one update can't wipe out all but the best few. False if nothing was alive to weigh.
+    public bool Reweight(float[] logLikelihood, float maxSpan)
+    {
+        float best = float.NegativeInfinity;
+        for (int i = 0; i < m_Count; i++)
+        {
+            if (m_Weight[i] > 0f && logLikelihood[i] > best)
+                best = logLikelihood[i];
+        }
+        if (float.IsNegativeInfinity(best) || float.IsNaN(best))
+            return false;
+        float total = 0f;
+        for (int i = 0; i < m_Count; i++)
+        {
+            if (m_Weight[i] <= 0f)
+                continue;
+            m_Weight[i] *= Mathf.Exp(Mathf.Max(logLikelihood[i] - best, -maxSpan));
+            total += m_Weight[i];
+        }
+        Normalize(total);
+        ResampleIfNeeded();
+        Roughen();
+        UpdateEstimate();
+        return true;
+    }
+
+    // After a measurement: jitter in proportion to the cloud's heading spread (see the constants), never collapsing
+    // it to nothing.
+    void Roughen()
+    {
+        float heading = Mathf.Clamp(HeadingSpread * RoughenShare, MinUpdateRoughen, MaxUpdateRoughen);
+        for (int i = 0; i < m_Count; i++)
+        {
+            if (m_Weight[i] <= 0f)
+                continue;
+            Vector2 to = m_Position[i] + Gaussian2() * UpdateRoughenPosition;
+            if (m_Walkable == null || m_Walkable.IsWalkable(to))
+                m_Position[i] = to;
+            m_Heading[i] = Bound(m_Heading[i] + Gaussian() * heading);
+        }
+    }
+
+    // Augmented MCL's bookkeeping (Probabilistic Robotics, Table 8.3): the weighted mean likelihood of the latest
+    // measurement, on a scale that's comparable from one update to the next (the scan's geometric mean per point).
+    public void ReportLikelihood(float average)
+    {
+        if (!(average > 0f))
+            return;
+        if (m_Updates == 0)
+        {
+            SlowAverage = FastAverage = average;
+        }
+        else
+        {
+            SlowAverage += AlphaSlow * (average - SlowAverage);
+            FastAverage += AlphaFast * (average - FastAverage);
+        }
+        m_Updates++;
+        // Measurements fitting worse than usual: resample now, so the injection happens.
+        if (InjectionShare > 0.05f)
+        {
+            Resample();
+            UpdateEstimate();
+        }
+    }
+
+    void ResetAverages()
+    {
+        m_Updates = 0;
+        SlowAverage = FastAverage = 0f;
+    }
+
+    /// <summary>Random particles are drawn round this sign hypothesis (rather than anywhere on the floor) until
+    /// ClearRing: a plate was just read.</summary>
+    public void SetRing(float worldBearing, float range, float rangeSigma, IReadOnlyList<Vector2> landmarks,
+        IReadOnlyList<Vector2> normals)
+    {
+        m_RingLandmarks.Clear();
+        m_RingNormals.Clear();
+        for (int k = 0; k < landmarks.Count; k++)
+        {
+            m_RingLandmarks.Add(landmarks[k]);
+            m_RingNormals.Add(normals != null && k < normals.Count ? normals[k] : Vector2.zero);
+        }
+        m_RingBearing = worldBearing;
+        m_RingRange = range;
+        m_RingSigma = Mathf.Max(rangeSigma, MinRangeSigma);
+    }
+
+    public void ClearRing() => m_RingLandmarks.Clear();
+
+    public Vector2 ParticlePosition(int i) => m_Position[i];
+    /// <summary>The plan's yaw by this particle: BaseYaw + its heading offset.</summary>
+    public float ParticleYaw(int i) => BaseYaw + m_Heading[i];
+    public float ParticleScale(int i) => m_Scale[i];
+    public float ParticleWeight(int i) => m_Weight[i];
+
+    /// <summary>The radius round the estimate holding this share of the weight, metres: 0.68 is what the map's halo
+    /// draws. A cloud strung out along a hallway reads as wide, as it should.</summary>
+    public float Radius(float share)
+    {
+        int n = 0;
+        for (int i = 0; i < m_Count; i++)
+        {
+            if (m_Weight[i] <= 0f)
+                continue;
+            m_Distance[n] = (m_Position[i] - Estimate).sqrMagnitude;
+            m_Order[n] = i;
+            n++;
+        }
+        if (n == 0)
+            return 0f;
+        Array.Sort(m_Distance, m_Order, 0, n);
+        float total = 0f;
+        for (int k = 0; k < n; k++)
+            total += m_Weight[m_Order[k]];
+        float sum = 0f, target = share * total;
+        for (int k = 0; k < n; k++)
+        {
+            sum += m_Weight[m_Order[k]];
+            if (sum >= target)
+                return Mathf.Sqrt(m_Distance[k]);
+        }
+        return Mathf.Sqrt(m_Distance[n - 1]);
+    }
+
     // A room-number sign seen at worldBearing (degrees clockwise from world +z) and range metres from the camera's
-    // position at the last step. Any of landmarks may be the sign (the same number can hang at two doors), each with
-    // the unit normal out of its wall (zero if not known). False if the sighting wasn't used.
+    // position at the last motion update. Any of landmarks may be the sign (the same number can hang at two doors),
+    // each with the unit normal out of its wall (zero if not known). False if the sighting wasn't used.
     public bool AddSignObservation(float worldBearing, float range, float rangeSigma, Vector2 landmark, Vector2 normal)
     {
         return AddSignObservation(worldBearing, range, rangeSigma, new[] { landmark }, new[] { normal });
@@ -287,16 +624,17 @@ public sealed class PositionFilter
         rangeSigma = Mathf.Max(rangeSigma, MinRangeSigma);
         PrepareStandOffs(landmarks, normals);
 
-        float total = Weigh(worldBearing, range, rangeSigma, landmarks, normals);
+        float total = WeighSign(worldBearing, range, rangeSigma, landmarks, normals);
         if (total <= 1e-12f)
         {
-            // Nothing here could have seen it.
+            // Nothing here could have seen it: a misread while the filter is sure, else the filter is wrong.
             bool trusted = Confidence >= TrustAbove && m_Contradictions == 0;
             m_Contradictions++;
             if (trusted)
                 return false;
-            SeedFromSign(worldBearing, range, rangeSigma, landmarks, normals);
-            total = Weigh(worldBearing, range, rangeSigma, landmarks, normals);
+            SeedRing(worldBearing, range, rangeSigma, landmarks, normals);
+            PrepareStandOffs(landmarks, normals);
+            total = WeighSign(worldBearing, range, rangeSigma, landmarks, normals);
             if (total <= 1e-12f)
                 return false;
         }
@@ -308,20 +646,19 @@ public sealed class PositionFilter
         return true;
     }
 
-    // Each particle's likelihood of the sighting, into m_Likelihood; returns the weighted total.
-    float Weigh(float worldBearing, float range, float rangeSigma, IReadOnlyList<Vector2> landmarks,
+    float WeighSign(float worldBearing, float range, float rangeSigma, IReadOnlyList<Vector2> landmarks,
         IReadOnlyList<Vector2> normals)
     {
         float total = 0f;
         for (int i = 0; i < m_Count; i++)
         {
-            m_Likelihood[i] = m_Weight[i] > 0f ? Likelihood(i, worldBearing, range, rangeSigma, landmarks, normals) : 0f;
+            m_Likelihood[i] = m_Weight[i] > 0f ? SignLikelihood(i, worldBearing, range, rangeSigma, landmarks, normals) : 0f;
             total += m_Weight[i] * m_Likelihood[i];
         }
         return total;
     }
 
-    float Likelihood(int i, float worldBearing, float range, float rangeSigma, IReadOnlyList<Vector2> landmarks,
+    float SignLikelihood(int i, float worldBearing, float range, float rangeSigma, IReadOnlyList<Vector2> landmarks,
         IReadOnlyList<Vector2> normals)
     {
         Vector2 p = m_Position[i];
@@ -372,37 +709,50 @@ public sealed class PositionFilter
         }
     }
 
-    // Starts the cloud again where the sighting puts the user: in front of each candidate sign, spread by the
-    // range noise and a little heading.
-    void SeedFromSign(float worldBearing, float range, float rangeSigma, IReadOnlyList<Vector2> landmarks,
+    // Starts the cloud again from a sighting alone, whatever the filter thought: for every sign with that text, on
+    // the ring at the measured range in front of its wall, each particle facing so that it sees the sign along the
+    // ray's bearing. Any heading: the filter is lost, or the sighting says it is. Walls, the scan and further signs
+    // then pick the right part of the rings out.
+    public void SeedRing(float worldBearing, float range, float rangeSigma, IReadOnlyList<Vector2> landmarks,
         IReadOnlyList<Vector2> normals)
     {
+        if (landmarks == null || landmarks.Count == 0)
+            return;
+        FreeHeading();
+        if (Adaptive)
+            m_Count = m_MaxCount;
+        PrepareStandOffs(landmarks, normals);
+        rangeSigma = Mathf.Max(rangeSigma, MinRangeSigma);
         for (int i = 0; i < m_Count; i++)
-        {
-            int k = i % landmarks.Count;
-            Vector2 normal = normals != null && k < normals.Count ? normals[k] : Vector2.zero;
-            Vector2 at = m_Position[i];
-            float heading = HeadingOffset;
-            for (int t = 0; t < SeedTries; t++)
-            {
-                float h = Mathf.Clamp(HeadingOffset + Gaussian() * NewFixHeadingSpread, -MaxHeadingOffset, MaxHeadingOffset);
-                float r = Mathf.Max(0.3f, range + Gaussian() * rangeSigma);
-                Vector2 c = landmarks[k] - HeadingVector(worldBearing - (BaseYaw + h)) * r + Gaussian2() * NewFixSpread;
-                if (normal.sqrMagnitude > 0.01f && Vector2.Dot(c - landmarks[k], normal) <= 0f)
-                    continue;
-                if (m_Walkable != null && !m_Walkable.IsWalkable(c))
-                    continue;
-                at = c;
-                heading = h;
-                break;
-            }
-            m_Position[i] = at;
-            m_Heading[i] = heading;
-            m_Scale[i] = Scale;
-        }
+            RingParticle(i, i % landmarks.Count, worldBearing, range, rangeSigma, landmarks, normals);
         Uniform();
-        RecoveriesInARow = 0;
-        m_GoodSteps = 0;
+        ForgetRecoveries();
+        ResetAverages();
+        UpdateEstimate();
+    }
+
+    // Particle i on landmark k's ring (PrepareStandOffs first). Keeps it where it was if no spot fits.
+    void RingParticle(int i, int k, float worldBearing, float range, float rangeSigma, IReadOnlyList<Vector2> landmarks,
+        IReadOnlyList<Vector2> normals)
+    {
+        Vector2 normal = normals != null && k < normals.Count ? normals[k] : Vector2.zero;
+        bool faced = normal.sqrMagnitude > 0.01f;
+        float facing = faced ? Heading(normal) : 0f;
+        float fan = faced ? RingFan : 180f;
+        for (int t = 0; t < SeedTries * 2; t++)
+        {
+            float outward = facing + ((float)m_Random.NextDouble() * 2f - 1f) * fan;
+            float r = Mathf.Max(0.3f, range + Gaussian() * rangeSigma);
+            Vector2 c = landmarks[k] + HeadingVector(outward) * r;
+            if (m_Walkable != null && (!m_Walkable.IsWalkable(c) ||
+                                       m_HasStandOff[k] && !m_Walkable.SegmentClear(c, m_StandOff[k])))
+                continue;
+            m_Position[i] = c;
+            // The plan's yaw that makes the ray's world bearing point from here at the sign.
+            m_Heading[i] = Bound(worldBearing - Heading(landmarks[k] - c) - BaseYaw + Gaussian() * NewFixHeadingSpread);
+            m_Scale[i] = Mathf.Clamp(1f + Gaussian() * StartScaleSpread, MinScale, MaxScale);
+            return;
+        }
     }
 
     // Every particle hit a wall: start again round where the estimate would have gone.
@@ -433,8 +783,40 @@ public sealed class PositionFilter
             }
         }
         m_Position[i] = at;
-        m_Heading[i] = Mathf.Clamp(heading + Gaussian() * headingSpread, -MaxHeadingOffset, MaxHeadingOffset);
+        m_Heading[i] = Bound(heading + Gaussian() * headingSpread);
         m_Scale[i] = Mathf.Clamp(scale + Gaussian() * scaleSpread, MinScale, MaxScale);
+    }
+
+    // A random particle for Augmented MCL: round the last sign read if there is one, else anywhere on the floor.
+    void Inject(int i)
+    {
+        Injected++;
+        if (m_RingLandmarks.Count > 0)
+        {
+            PrepareStandOffs(m_RingLandmarks, m_RingNormals);
+            RingParticle(i, m_Random.Next(m_RingLandmarks.Count), m_RingBearing, m_RingRange, m_RingSigma,
+                m_RingLandmarks, m_RingNormals);
+            return;
+        }
+        if (m_Walkable == null)
+            return;
+        for (int t = 0; t < SeedTries * 4; t++)
+        {
+            var c = new Vector2(m_Walkable.left + (float)m_Random.NextDouble() * m_Walkable.width * m_Walkable.cell,
+                m_Walkable.top - (float)m_Random.NextDouble() * m_Walkable.height * m_Walkable.cell);
+            if (!m_Walkable.IsWalkable(c))
+                continue;
+            m_Position[i] = c;
+            m_Heading[i] = RandomHeading();
+            m_Scale[i] = Mathf.Clamp(1f + Gaussian() * StartScaleSpread, MinScale, MaxScale);
+            return;
+        }
+    }
+
+    float RandomHeading()
+    {
+        float limit = HeadingLimit >= 180f ? 180f : HeadingLimit;
+        return Bound(((float)m_Random.NextDouble() * 2f - 1f) * limit);
     }
 
     // p if it's walkable (or there's no map), else the nearest walkable spot within reach, else fallback.
@@ -443,6 +825,13 @@ public sealed class PositionFilter
         if (m_Walkable == null || m_Walkable.IsWalkable(p))
             return p;
         return m_Walkable.Nearest(p, reach, out Vector2 nearest) ? nearest : fallback;
+    }
+
+    // An offset wrapped to (-180, 180] and kept within HeadingLimit.
+    float Bound(float heading)
+    {
+        heading = Mathf.DeltaAngle(0f, heading);
+        return HeadingLimit >= 180f ? heading : Mathf.Clamp(heading, -HeadingLimit, HeadingLimit);
     }
 
     void Uniform()
@@ -467,14 +856,22 @@ public sealed class PositionFilter
             Resample();
     }
 
-    // Systematic resampling: m_Count evenly spaced picks along the cumulative weights.
+    // The low-variance sampler (Probabilistic Robotics, Table 4.4): one random number, then evenly spaced picks along
+    // the cumulative weights. With Adaptive on, the new count is KLD-sampling's bound for the bins the weighted cloud
+    // covers; Augmented MCL then swaps InjectionShare of the picks for random particles.
     void Resample()
     {
-        float step = 1f / m_Count;
+        int n = Adaptive ? KldCount() : m_Count;
+        float total = 0f;
+        for (int i = 0; i < m_Count; i++)
+            total += m_Weight[i];
+        if (!(total > 0f))
+            return;
+        float step = total / n;
         float target = (float)m_Random.NextDouble() * step;
         float cumulative = m_Weight[0];
         int j = 0, lastAlive = m_Weight[0] > 0f ? 0 : -1;
-        for (int i = 0; i < m_Count; i++, target += step)
+        for (int i = 0; i < n; i++, target += step)
         {
             while (target > cumulative && j < m_Count - 1)
             {
@@ -491,12 +888,54 @@ public sealed class PositionFilter
         (m_Position, m_SparePosition) = (m_SparePosition, m_Position);
         (m_Heading, m_SpareHeading) = (m_SpareHeading, m_Heading);
         (m_Scale, m_SpareScale) = (m_SpareScale, m_Scale);
+        m_Count = n;
+
+        float inject = InjectionShare;
+        for (int i = 0; i < m_Count; i++)
+        {
+            if (inject > 0f && m_Random.NextDouble() < inject)
+            {
+                Inject(i);
+                continue;
+            }
+            Vector2 to = m_Position[i] + Gaussian2() * RoughenPosition;
+            if (m_Walkable == null || m_Walkable.IsWalkable(to))
+                m_Position[i] = to;
+            m_Heading[i] = Bound(m_Heading[i] + Gaussian() * RoughenHeading);
+            m_Scale[i] = Mathf.Clamp(m_Scale[i] + Gaussian() * RoughenScale, MinScale, MaxScale);
+        }
         Uniform();
+    }
+
+    // KLD-sampling (Fox, IJRR 2003): enough particles that the sample-based estimate is within ε (in K-L divergence)
+    // of the true posterior with probability 1 - δ, given the k bins the weighted cloud occupies.
+    int KldCount()
+    {
+        m_Bins.Clear();
+        float floor = 0.2f / m_Count;
+        for (int i = 0; i < m_Count; i++)
+        {
+            if (m_Weight[i] <= floor)
+                continue;
+            long x = Mathf.FloorToInt(m_Position[i].x / BinSize) & 0xFFFFF;
+            long z = Mathf.FloorToInt(m_Position[i].y / BinSize) & 0xFFFFF;
+            long h = Mathf.FloorToInt((m_Heading[i] + 180f) / BinDegrees) & 0xFF;
+            m_Bins.Add((x << 28) | (z << 8) | h);
+        }
+        int k = m_Bins.Count;
+        int n = MinCount;
+        if (k > 1)
+        {
+            float a = 2f / (9f * (k - 1));
+            float b = 1f - a + Mathf.Sqrt(a) * KldQuantile;
+            n = Mathf.CeilToInt((k - 1) / (2f * KldEpsilon) * b * b * b);
+        }
+        return Mathf.Clamp(n, Mathf.Min(MinCount, m_MaxCount), m_MaxCount);
     }
 
     void UpdateEstimate()
     {
-        float total = 0f, heading = 0f, scale = 0f;
+        float total = 0f, scale = 0f, sin = 0f, cos = 0f;
         Vector2 mean = Vector2.zero;
         for (int i = 0; i < m_Count; i++)
         {
@@ -505,13 +944,19 @@ public sealed class PositionFilter
                 continue;
             total += w;
             mean += m_Position[i] * w;
-            heading += m_Heading[i] * w;
+            // Round the circle, so headings either side of 180 average to 180, not 0.
+            float r = m_Heading[i] * Mathf.Deg2Rad;
+            sin += Mathf.Sin(r) * w;
+            cos += Mathf.Cos(r) * w;
             scale += m_Scale[i] * w;
         }
         if (total <= 0f)
             return;
         mean /= total;
-        HeadingOffset = heading / total;
+        HeadingOffset = Mathf.Atan2(sin, cos) * Mathf.Rad2Deg;
+        // Circular standard deviation from the mean resultant length R: sqrt(-2 ln R).
+        float resultant = Mathf.Clamp(Mathf.Sqrt(sin * sin + cos * cos) / total, 1e-6f, 1f);
+        HeadingSpread = Mathf.Sqrt(-2f * Mathf.Log(resultant)) * Mathf.Rad2Deg;
         Scale = scale / total;
 
         // The mean of a cloud split by a wall can sit in the wall: then the particle nearest it stands in.

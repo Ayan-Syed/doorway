@@ -190,10 +190,61 @@ public partial class NavigationScreen
     }
 
     // Every hook starts here: the screen set up once, and the sheets fitted to the preview's safe area.
+    // Indoors, the Localizer's estimate made up: on the floor's map with the dot at a plan point, coloured and
+    // haloed for the state, and the banner that state asks for.
+    public void PreviewIndoor(LocalizerState state, Vector2 at, float heading, float spread, bool needsView)
+    {
+        PreviewBegin();
+        m_PreviewingIndoor = true;
+        m_PreviewIndoor = new Indoor
+        {
+            state = state,
+            position = at,
+            heading = heading,
+            spread = spread,
+            needsView = needsView,
+            askForSign = state == LocalizerState.Lost,
+        };
+        m_Indoor = m_PreviewIndoor;
+        ResetHome(false);
+        HomeInsets(homeSheet.Stop);
+        map.FramePoints(new[] { at }, 0f, 36f, true);
+        UpdateGpsPuck();
+        map.TintPuck(PuckColor(), state == LocalizerState.Lost);
+        UpdateBanner();
+    }
+
+    // The snap card the Localizer offers coming in through an entrance (the phone still outdoors).
+    public void PreviewEntrance(PlanPlace entrance)
+    {
+        PreviewBegin();
+        ResetHome(false);
+        if (entrance != null && entrance.doors.Count > 0)
+            OpenSnapCard(entrance, entrance.doors[0], true, true);
+    }
+
+    // The debug overlay over the floor's map, a cloud of particles round the estimate, the door chips open.
+    public void PreviewDebug(Vector2 at, float heading, float spread)
+    {
+        PreviewIndoor(LocalizerState.Converging, at, heading, spread, false);
+        if (debugOverlay != null)
+            debugOverlay.Preview(LocalizerState.Converging, at, spread, 0.64f, true);
+    }
+
+    // Every hook starts here: the screen set up once, the sheets fitted to the preview's safe area, and anything an
+    // indoor preview left (the made-up estimate, the snap card, the debug overlay) gone.
     void PreviewBegin()
     {
         Initialize();
         if (Mathf.Abs(safeArea.rect.height - m_SafeHeight) > 1f)
             UpdateStops();
+        m_PreviewingIndoor = false;
+        m_Indoor = default;
+        CloseSnapCard(false);
+        if (debugOverlay != null)
+            debugOverlay.Show(false);
+        if (positionBanner != null)
+            positionBanner.gameObject.SetActive(false);
+        map.TintPuck(Theme.Current.primary, false);
     }
 }

@@ -59,6 +59,7 @@ public static partial class BuildNavigateScene
         // Over the sheets.
         CreateSearch(screen, panel);
         CreateFloorMenu(screen, panel);
+        CreateInsideButton(screen, panel);
         screen.homeList.searchField = screen.searchField;
     }
 

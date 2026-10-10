@@ -8,6 +8,7 @@ public partial class NavigationScreen
     // The start list as last built: for which destination, and which doors were "Near you" (and from where). The
     // same again is kept as it is, so going back and forth between Start and Align, or Re-align, rebuilds nothing.
     PlanPlace m_StartListFor;
+    bool m_StartListBuilt;
     readonly List<PlanDoor> m_StartListNear = new List<PlanDoor>();
     readonly List<(PlanPlace place, PlanDoor door)> m_NearYou = new List<(PlanPlace place, PlanDoor door)>();
     Vector2 m_NearYouAt;
@@ -19,8 +20,10 @@ public partial class NavigationScreen
     {
         if (location != null && Application.isPlaying)
             location.Suspend(m_Step == Step.Guide || m_Step == Step.Arrived);
-        if (m_Step > Step.Start)
-            return;
+        if (m_Step > Step.Start || m_SnapOpen)
+            return;   // the snap card shows the dot on its door
+        if (ShowIndoorDot())
+            return;   // indoors the dot is the Localizer's
         if (location != null && location.HasFix && OnMap(location.Position))
             map.ShowPuck(location.Position, 0f, ShownAccuracy(), false);
         else
@@ -72,17 +75,27 @@ public partial class NavigationScreen
     }
 
     // allowAuto (from the place card's Directions): start at the door nearest the phone's location, now if it's
-    // good enough, or as soon as it is while the list shows and the user hasn't touched it.
+    // good enough, or as soon as it is while the list shows and the user hasn't touched it. No destination: the
+    // list is for saying where you are (ShowDoorPicker).
     void ShowStart(PlanPlace destination, bool allowAuto)
     {
         Haptics.Tick(15);
         navigator.Stop();
+        m_PickingDoor = false;
         m_Destination = m_Selected = destination;
-        string destinationTitle = PlaceStyle.Title(destination);
-        destinationText.text = destinationTitle;
         map.ShowOnly(null);
         map.Select(destination);
-        map.ShowPin(map.Anchor(destination), destinationTitle);
+        if (destination != null)
+        {
+            string destinationTitle = PlaceStyle.Title(destination);
+            destinationText.text = destinationTitle;
+            map.ShowPin(map.Anchor(destination), destinationTitle);
+        }
+        else
+        {
+            allowAuto = false;
+            map.HidePin();
+        }
 
         m_AutoStart = false;
         if (allowAuto && location != null)
@@ -136,7 +149,7 @@ public partial class NavigationScreen
             }
         }
 
-        bool same = destination == m_StartListFor && m_NearYou.Count == m_StartListNear.Count;
+        bool same = m_StartListBuilt && destination == m_StartListFor && m_NearYou.Count == m_StartListNear.Count;
         for (int i = 0; same && i < m_NearYou.Count; i++)
             same = m_NearYou[i].door == m_StartListNear[i];
         if (same)
@@ -145,6 +158,7 @@ public partial class NavigationScreen
             return;
         }
         m_StartListFor = destination;
+        m_StartListBuilt = true;
         m_StartListNear.Clear();
 
         startList.Clear();
@@ -156,7 +170,7 @@ public partial class NavigationScreen
                 startList.AddSection("Near you");
             // The phone's location goes along (as it is when tapped), so "Not here?" offers the doors around it.
             startList.AddRow(place.kind, PlaceStyle.DoorTitle(place, door), place.detail,
-                () => ShowAlign(place, door, false, m_NearYouAt));
+                () => StartFrom(place, door, m_NearYouAt));
         }
         foreach (var (title, kinds) in Sections)
         {
@@ -173,7 +187,7 @@ public partial class NavigationScreen
                         header = true;
                     }
                     startList.AddRow(place.kind, PlaceStyle.DoorTitle(place, door), place.detail,
-                        () => ShowAlign(place, door, false, null));
+                        () => StartFrom(place, door, null));
                 }
             }
         }

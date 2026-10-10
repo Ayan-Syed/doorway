@@ -36,6 +36,8 @@ public partial class Navigator
         Vector2 door = Plan.NodePosition(Route.door.node);
         pin.Show(Route.place, door, Route.door.Direction);
         m_Log?.Rerouted(door);
+        if (m_SharedFilter)
+            localizer.Note("rerouted");
         Rerouted?.Invoke();
     }
 
@@ -195,7 +197,8 @@ public partial class Navigator
     {
         if (planeManager == null)
             return;
-        PlaneDetectionMode mode = IsGuiding && m_FloorSettled ? PlaneDetectionMode.None : PlaneDetectionMode.Horizontal;
+        PlaneDetectionMode mode = (IsGuiding || m_KeepAR) && m_FloorSettled ? PlaneDetectionMode.None
+            : PlaneDetectionMode.Horizontal;
         if (m_KeepVerticalPlanes)
             mode |= PlaneDetectionMode.Vertical;
         if (planeManager.requestedDetectionMode != mode)
@@ -227,6 +230,14 @@ public partial class Navigator
         FollowEstimate();
     }
 
+    // With the Localizer's filter: it moves the filter; the user is where it says.
+    void FollowLocalizer()
+    {
+        UserPosition = localizer.Position;
+        UserHeading = localizer.Heading;
+        FollowEstimate();
+    }
+
     // Moves the plan root part of the way to where the filter puts it: the estimate's plan spot under the camera
     // where the filter last stepped, turned by the filter's yaw. It turns about that spot, the user's, so the band
     // at the user's feet doesn't swing when the plan turns.
@@ -247,6 +258,11 @@ public partial class Navigator
     // with a walkable map; logged either way.
     public void AddSighting(SignSighting sighting)
     {
+        if (localizer != null)
+        {
+            localizer.AddSighting(sighting);
+            return;
+        }
         bool used = UseSighting(sighting, out float bearing, out float range, out float sigma);
         m_Log?.Sighting(sighting, bearing, range, sigma, used);
     }

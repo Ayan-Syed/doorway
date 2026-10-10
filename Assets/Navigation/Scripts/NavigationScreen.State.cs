@@ -13,7 +13,7 @@ public partial class NavigationScreen
     const float StartPeek = 196f;
     const float PlaceHeight = 560f;
     const float AlignHeight = 540f;
-    const float SettingsHeight = 1360f;
+    const float SettingsHeight = 1480f;
     const float KnobTravel = 22f;
 
     // How far the maps lean back with the 3D map on, in degrees.
@@ -40,6 +40,8 @@ public partial class NavigationScreen
     const float MinAccuracyShown = 2f;
     // At most this many "Near you" rows.
     const int NearYouRows = 4;
+    // Holding the settings gear this long turns the debug overlay on or off.
+    const float DebugHoldSeconds = 1.5f;
     // Seconds a snackbar stays before it fades.
     const float SnackbarSeconds = 2.8f;
     // Window for the second tap on End.

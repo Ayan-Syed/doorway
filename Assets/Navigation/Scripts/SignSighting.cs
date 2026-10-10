@@ -17,4 +17,9 @@ public struct SignSighting
     public float distance;
     /// <summary>One standard deviation of that distance, metres.</summary>
     public float distanceSigma;
+    /// <summary>The digits' height in image pixels, and the focal length in the same pixels: with a known distance
+    /// (once the position is confident) they measure the plates' real digit height.</summary>
+    public float digitPixels, focalPixels;
+    /// <summary>True when the distance came from ARCore depth or a detected wall, not from the digits' size.</summary>
+    public bool distanceMeasured;
 }

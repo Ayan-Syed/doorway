@@ -90,6 +90,7 @@ public partial class Navigator
         ShouldRealign = false;
         m_LostTime = 0f;
         m_Filter = null;
+        m_SharedFilter = false;
         UserPosition = Route.PointAt(progress);
         RawPosition = UserPosition;
         UserHeading = Heading(Route.DirectionAt(progress)) + turn;

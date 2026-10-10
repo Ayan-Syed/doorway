@@ -99,7 +99,10 @@ public partial class NavigationScreen
     {
         m_Step = step;
         if (step != Step.Start)
+        {
             m_AutoStart = false;
+            m_PickingDoor = false;
+        }
         // The map is behind Home to Align, and behind the arrived card: AR is off by then, so there's no camera
         // feed to show through.
         bool onMap = step <= Step.Align || step == Step.Arrived;
@@ -120,6 +123,8 @@ public partial class NavigationScreen
         SetFloorMenu(false);
         if (step > Step.Place)
             CloseSettings();
+        if (step >= Step.Align)
+            CloseSnapCard(false);
         if (chipBar.gameObject.activeSelf != (step == Step.Home))
             chipBar.gameObject.SetActive(step == Step.Home);
         SetAlpha(floorPicker, 1f);
@@ -129,11 +134,15 @@ public partial class NavigationScreen
         // AR runs from picking a start (so it's tracking by Start) to the end of the walk. Before that the map fills
         // the screen and the camera would only cost frames and battery behind it; on the arrived card it's done.
         // The screen stays on over the same stretch (the phone is held up, untouched) and sleeps as usual on the map.
+        // Indoors the Localizer runs AR the whole time (it's how the position is kept), so the steps leave it alone,
+        // and the screen stays on: asleep, the position would be lost.
         if (Application.isPlaying)
         {
             bool ar = step >= Step.Start && step <= Step.Guide;
-            navigator.SetARActive(ar);
-            Screen.sleepTimeout = ar ? SleepTimeout.NeverSleep : SleepTimeout.SystemSetting;
+            bool inside = localizer != null && localizer.Indoors;
+            if (!inside)
+                navigator.SetARActive(ar);
+            Screen.sleepTimeout = ar || inside ? SleepTimeout.NeverSleep : SleepTimeout.SystemSetting;
         }
         // With Depth, the AR camera's feed shows through behind the UI.
         if (uiCamera != null)
@@ -225,6 +234,7 @@ public partial class NavigationScreen
                 UpdateGuide(false);
                 break;
         }
+        UpdateIndoor();
 
         float fade = Time.unscaledDeltaTime * FadeSpeed;
         foreach (CanvasGroup panel in m_Panels)
@@ -256,6 +266,13 @@ public partial class NavigationScreen
     // Android's back button, and the route card's back arrow.
     void Back()
     {
+        if (m_SnapOpen)
+        {
+            CloseSnapCard(true);   // Not now
+            return;
+        }
+        if (debugOverlay != null && debugOverlay.CloseCheckpoints())
+            return;
         if (m_SettingsOpen)
         {
             CloseSettings();
@@ -292,7 +309,10 @@ public partial class NavigationScreen
                 ShowHome();
                 break;
             case Step.Start:
-                ShowPlace(m_Destination);
+                if (m_PickingDoor || m_Destination == null)
+                    ShowHome();
+                else
+                    ShowPlace(m_Destination);
                 break;
             case Step.Align:
                 ShowStart(m_Destination, false);
@@ -318,21 +338,8 @@ public partial class NavigationScreen
     // Just above whatever is along the bottom, but never above 60 % of the screen.
     void PlaceSnackbar()
     {
-        float bottom;
-        if (settingsPanel.gameObject.activeSelf)
-            bottom = settingsSheet.Height;
-        else
-            switch (m_Step)
-            {
-                case Step.Home: bottom = homeSheet.Height; break;
-                case Step.Place: bottom = placeSheet.Height; break;
-                case Step.Start: bottom = startSheet.Height; break;
-                case Step.Align: bottom = alignSheet.Height; break;
-                case Step.Guide: bottom = TopOf(miniMapFrame); break;
-                default: bottom = TopOf(arrivedCard); break;
-            }
         var rect = (RectTransform)snackbar.transform;
-        float y = Mathf.Min(bottom, safeArea.rect.height * 0.6f) + 24f;
+        float y = Mathf.Min(BottomUI(), safeArea.rect.height * 0.6f) + 24f + BannerTaken;   // over the position banner
         if (rect.anchoredPosition.y != y)
             rect.anchoredPosition = new Vector2(rect.anchoredPosition.x, y);
     }

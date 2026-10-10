@@ -227,17 +227,25 @@ public static partial class BuildNavigateScene
         arCamera.nearClipPlane = 0.05f;
         arCamera.cullingMask &= ~(1 << UILayer);   // The UI has a camera of its own.
 
-        // Planes are tracked (Navigator reads the floor's height from them) but never drawn: no prefab.
+        // Planes are tracked but never drawn (no prefab): the floor's height, and the walls the Localizer matches
+        // against the plan. Navigator narrows the detection at runtime (no more floor once it's settled).
         var planes = origin.gameObject.AddComponent<ARPlaneManager>();
-        planes.requestedDetectionMode = PlaneDetectionMode.Horizontal;
+        planes.requestedDetectionMode = PlaneDetectionMode.Horizontal | PlaneDetectionMode.Vertical;
+        // Feature points: the Localizer's depth scan on phones without the Depth API. Off until it wants them.
+        var points = origin.gameObject.AddComponent<ARPointCloudManager>();
+        points.enabled = false;
 
         Navigator navigator = CreateNavigator(planJson, arCamera.transform, planes);
         navigator.signReader = CreateSignReader(arCamera);
         navigator.session = session;
+        Localizer localizer = CreateLocalizer(navigator, points);
 
         screen = CreateScreen(navigator);
         if (screen == null)
             return false;
+        screen.localizer = localizer;
+        if (screen.debugOverlay != null)
+            screen.debugOverlay.localizer = localizer;
 
         EnsureFolder("Assets/Scenes");
         EditorSceneManager.SaveScene(scene, ScenePath);
