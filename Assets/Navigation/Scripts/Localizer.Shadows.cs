@@ -56,6 +56,34 @@ public sealed partial class LocalizerEngine
     /// <summary>The log likelihood ratio of the snap over each shadow, and metres walked camera-up (for diagnostics).</summary>
     public string ShadowState => m_Shadows.Count == 0 ? "-" :
         $"{m_ShadowWalked:F0}m " + string.Join(" ", m_Shadows.ConvertAll(sh => (MainLog - LogOf(sh)).ToString("F1")));
+    /// <summary>How far the snap leads its closest shadow, in log likelihood (infinity with none left).</summary>
+    public double ShadowLead
+    {
+        get
+        {
+            double lead = double.PositiveInfinity;
+            for (int k = 0; k < m_Shadows.Count; k++)
+                lead = Math.Min(lead, MainLog - LogOf(m_Shadows[k]));
+            return lead;
+        }
+    }
+
+    // What the cloud's own spread doesn't show: another door that the walk has come to favour over the snapped one
+    // (its lead fallen under DoubtLead, below the snap's own prior: evidence against the snap, not just doubt): then
+    // the spread reaches that door's estimate; and a cloud that went wide or was placed by one plate and hasn't had a
+    // second (NeedsSign: at least UnsureSpread). Shown in Spread, so guidance (which goes by it) says it's finding
+    // the spot rather than guiding from a guess; in the stress walks those stretches were the guided error's tail.
+    float AmbiguitySpread()
+    {
+        float spread = m_NeedsSign && State == LocalizerState.Converging ? UnsureSpread : 0f;
+        for (int k = 0; k < m_Shadows.Count; k++)
+            if (MainLog - LogOf(m_Shadows[k]) < DoubtLead)
+                spread = Mathf.Max(spread, Vector2.Distance(m_Shadows[k].filter.Estimate, m_Filter.Estimate));
+        return spread;
+    }
+
+    const float DoubtLead = 1.4f, UnsureSpread = 3f;
+
     /// <summary>Shadow hypotheses still running.</summary>
     public int Shadows => m_Shadows.Count;
 

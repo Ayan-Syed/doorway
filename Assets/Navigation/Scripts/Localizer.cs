@@ -52,6 +52,9 @@ public partial class Localizer : MonoBehaviour
     public float Heading { get; private set; }
     /// <summary>Metres: the radius round Position holding about 68% of the particles' weight (the map's halo).</summary>
     public float Spread { get; private set; }
+    /// <summary>How far off along the way the position may be besides Spread, metres (ARCore's scale not yet pinned
+    /// by a plate or a wall across the way): matters near a turn, not mid-corridor.</summary>
+    public float AlongSpread => Indoors && m_Engine != null ? m_Engine.AlongSpread : 0f;
     public float Confidence { get; private set; }
     /// <summary>Not confident, and the camera can't see (lowered, or ARCore not tracking): "Hold your phone up".</summary>
     public bool NeedsView { get; private set; }

@@ -35,6 +35,11 @@ public static partial class ReplayEvaluator
         public double firstWrongAt = double.NaN;
         public readonly List<float> errors = new List<float>();   // while not Lost
         public readonly List<float> localizedErrors = new List<float>();
+        // What the user sees (GuidanceSim): walking time, the part with normal guidance and its errors, the walk's
+        // length, and each "Finding your exact spot…" spell's length.
+        public float walkSeconds, guidedSeconds, walked;
+        public readonly List<float> guidedErrors = new List<float>();
+        public readonly List<float> interruptions = new List<float>();
         public readonly List<float> recoveries = new List<float>();
         public int lost, wrong, within, judged;
     }
@@ -46,8 +51,52 @@ public static partial class ReplayEvaluator
         public int walks, violations;
         public float median, p75, p95, max, lostShare, wrongShare, calibration, recoveryMedian, recoveryMax;
         public float localizedShare, localizedP95, localizedMax;
+        public float guidance, guidedP75, guidedP95, guidedMax, interruptionsPer100m, interruptionMedian, interruptionP90;
         public int recoveries, slowRecoveries;
     }
+
+    /// <summary>The guidance the UI would show (NavigationScreen.JudgeGuidance, mirrored here: keep the two alike):
+    /// normal guidance unless Lost (at once) or Converging with Spread past UnsureEnter, back under UnsureLeave, each
+    /// change held GuidanceHold seconds; out of Lost at once.</summary>
+    public sealed class GuidanceSim
+    {
+        public const float UnsureEnter = 2.5f, UnsureLeave = 2f, GuidanceHold = 1f;
+        enum Guidance { Sure, Unsure, Lost }
+        Guidance m_Guidance;
+        double m_Pending = -1;
+
+        /// <summary>Whether normal guidance shows at time t.</summary>
+        public bool Judge(LocalizerState state, float spread, double t)
+        {
+            if (state == LocalizerState.Lost)
+            {
+                m_Pending = -1;
+                m_Guidance = Guidance.Lost;
+                return false;
+            }
+            bool wide = state == LocalizerState.Converging &&
+                        (m_Guidance == Guidance.Unsure ? spread >= UnsureLeave : spread > UnsureEnter);
+            Guidance want = wide ? Guidance.Unsure : Guidance.Sure;
+            if (want == m_Guidance)
+                m_Pending = -1;
+            else if (m_Guidance == Guidance.Lost)
+            {
+                m_Guidance = want;
+                m_Pending = -1;
+            }
+            else if (m_Pending < 0)
+                m_Pending = t;
+            else if (t - m_Pending >= GuidanceHold)
+            {
+                m_Guidance = want;
+                m_Pending = -1;
+            }
+            return m_Guidance == Guidance.Sure;
+        }
+    }
+
+    // Walking: the truth moved more than this between two truth rows (a fifth of a second).
+    const float MovingStep = 0.05f;
 
     /// <summary>The error over which Localized counts as confidently wrong, metres.</summary>
     public const float WrongDistance = 3f;
@@ -58,7 +107,9 @@ public static partial class ReplayEvaluator
         var result = new StressWalkResult { walk = walk.name, config = config.name, info = walk.info, tier = walk.tier };
         var engine = new LocalizerEngine(plan, walkable, field, walls, config, seed);
         var feeder = new Feeder(engine);
-        double signWhileLost = double.NaN;
+        double signWhileLost = double.NaN, lastT = double.NaN, unsureSince = double.NaN;
+        Vector2 lastTruth = default;
+        var guidance = new GuidanceSim();
         foreach (string line in walk.lines)
         {
             bool lost = engine.State == LocalizerState.Lost;
@@ -73,6 +124,30 @@ public static partial class ReplayEvaluator
             var truth = new Vector2(float.Parse(c[2], CultureInfo.InvariantCulture), float.Parse(c[3], CultureInfo.InvariantCulture));
             float error = Vector2.Distance(engine.Position, truth);
             result.samples++;
+            bool sure = guidance.Judge(engine.State, engine.Spread, t);
+            if (!double.IsNaN(lastT))
+            {
+                float step = Vector2.Distance(truth, lastTruth), dt = (float)(t - lastT);
+                result.walked += step;
+                if (step > MovingStep)
+                {
+                    result.walkSeconds += dt;
+                    if (sure)
+                    {
+                        result.guidedSeconds += dt;
+                        result.guidedErrors.Add(error);
+                    }
+                }
+            }
+            if (!sure && double.IsNaN(unsureSince))
+                unsureSince = t;
+            else if (sure && !double.IsNaN(unsureSince))
+            {
+                result.interruptions.Add((float)(t - unsureSince));
+                unsureSince = double.NaN;
+            }
+            lastT = t;
+            lastTruth = truth;
             if (engine.State == LocalizerState.Lost)
             {
                 result.lost++;
@@ -96,6 +171,8 @@ public static partial class ReplayEvaluator
                 signWhileLost = double.NaN;
             }
         }
+        if (!double.IsNaN(unsureSince))
+            result.interruptions.Add((float)(lastT - unsureSince));
         result.errors.Sort();
         result.p95 = Percentile(result.errors, 0.95f);
         result.max = result.errors.Count > 0 ? result.errors[result.errors.Count - 1] : 0f;
@@ -113,6 +190,9 @@ public static partial class ReplayEvaluator
             var errors = group.SelectMany(r => r.errors).OrderBy(e => e).ToList();
             var recoveries = group.SelectMany(r => r.recoveries).OrderBy(e => e).ToList();
             var localized = group.SelectMany(r => r.localizedErrors).OrderBy(e => e).ToList();
+            var guided = group.SelectMany(r => r.guidedErrors).OrderBy(e => e).ToList();
+            var spells = group.SelectMany(r => r.interruptions).OrderBy(e => e).ToList();
+            float walkSeconds = group.Sum(r => r.walkSeconds), walked = group.Sum(r => r.walked);
             int samples = group.Sum(r => r.samples), judged = group.Sum(r => r.judged);
             summaries.Add(new StressSummary
             {
@@ -134,6 +214,13 @@ public static partial class ReplayEvaluator
                 localizedShare = samples > 0 ? localized.Count / (float)samples : float.NaN,
                 localizedP95 = Percentile(localized, 0.95f),
                 localizedMax = localized.Count > 0 ? localized[localized.Count - 1] : float.NaN,
+                guidance = walkSeconds > 0f ? group.Sum(r => r.guidedSeconds) / walkSeconds : float.NaN,
+                guidedP75 = Percentile(guided, 0.75f),
+                guidedP95 = Percentile(guided, 0.95f),
+                guidedMax = guided.Count > 0 ? guided[guided.Count - 1] : float.NaN,
+                interruptionsPer100m = walked > 0f ? 100f * spells.Count / walked : float.NaN,
+                interruptionMedian = Percentile(spells, 0.5f),
+                interruptionP90 = Percentile(spells, 0.9f),
             });
         }
         return summaries;
