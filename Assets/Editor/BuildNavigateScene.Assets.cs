@@ -143,13 +143,13 @@ public static partial class BuildNavigateScene
         return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
     }
 
-    // The marker emoji, as sprites: mipmapped, since they're drawn at under half their size. Null if any is missing.
-    static Sprite[] ImportEmoji()
+    // The marker shapes, as sprites: mipmapped, since they're drawn at under half their size. Null if any is missing.
+    static Sprite[] ImportMarkers()
     {
-        var sprites = new Sprite[MarkerEmoji.Length];
-        for (int i = 0; i < MarkerEmoji.Length; i++)
+        var sprites = new Sprite[MarkerShapes.Length];
+        for (int i = 0; i < MarkerShapes.Length; i++)
         {
-            string path = $"{EmojiFolder}/emoji_u{MarkerEmoji[i]}.png";
+            string path = $"{MarkerFolder}/marker-{MarkerShapes[i]}.png";
             TextureImporter importer = Importer(path, true);
             if (importer == null)
                 return null;

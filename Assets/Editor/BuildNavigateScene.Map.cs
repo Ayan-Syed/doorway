@@ -121,7 +121,7 @@ public static partial class BuildNavigateScene
         map.pinLabel = pinLabel;
 
         // The user: a disc for how far off the phone's location may be (FloorMap sizes it), a beam the way they
-        // face, and their marker: the blue dot (a white rim and the dot) or an emoji on a white disc.
+        // face, and their marker: the dot (a white rim and the dot) or a shape (which has its own rim and shadow).
         RectTransform you = Child("You", overlay);
         you.sizeDelta = Vector2.zero;
         map.puck = you.gameObject;
@@ -138,14 +138,13 @@ public static partial class BuildNavigateScene
         map.puckFill = Dot("Fill", dot, Center, Vector2.zero, 36f * s, s_T.primary);
         map.puckDot = dot.gameObject;
         RectTransform avatar = Fixed("Avatar", you, Center, Vector2.zero, new Vector2(84f, 84f) * s);
-        Card(avatar, Color.white, 42f * s, true);
-        var emoji = Fixed("Emoji", avatar, Center, Vector2.zero, new Vector2(60f, 60f) * s).gameObject.AddComponent<Image>();
-        emoji.sprite = s_Emoji[0];
-        emoji.preserveAspect = true;
-        emoji.raycastTarget = false;
+        var shape = Stretch("Shape", avatar).gameObject.AddComponent<Image>();
+        shape.sprite = s_Markers[0];
+        shape.preserveAspect = true;
+        shape.raycastTarget = false;
         avatar.gameObject.SetActive(false);
         map.puckAvatar = avatar.gameObject;
-        map.puckEmoji = emoji;
+        map.puckShape = shape;
         // A "?" on the marker's shoulder while the position is lost (FloorMap.TintPuck).
         RectTransform unknown = Fixed("Unknown", you, Center, new Vector2(30f, 30f) * s, new Vector2(40f, 40f) * s);
         Card(unknown, s_T.onSurfaceVariant, 20f * s, true);

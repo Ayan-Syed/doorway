@@ -49,7 +49,7 @@ public partial class NavigationScreen
     void SetMarker(int marker, bool save)
     {
         int sprites = markerSprites == null ? 0 : markerSprites.Length;
-        m_Marker = Mathf.Clamp(marker, 0, sprites);
+        m_Marker = marker >= 0 && marker <= sprites ? marker : 0;   // a saved emoji from before the shapes: the dot
         Sprite sprite = m_Marker == 0 ? null : markerSprites[m_Marker - 1];
         map.SetMarker(sprite);
         miniMap.SetMarker(sprite);

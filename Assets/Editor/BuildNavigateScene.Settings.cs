@@ -30,35 +30,41 @@ public static partial class BuildNavigateScene
         TextIn(TopBand("Marker Detail", sheet, 198f, 44f, 48f, 48f), "Shows where you are on the map", s_Regular, 32,
             s_T.onSurfaceVariant, TextAnchor.MiddleLeft);
 
-        // The blue dot, then the emoji: 5 a row, 3 rows (528 = 3 x 160 + 2 x 24).
-        RectTransform markers = TopBand("Markers", sheet, 268f, 528f, 48f, 48f);
+        // The dot, then the shapes, in one row: each a tile with its name under it (984 = 5 x 160 + 4 x 46).
+        RectTransform markers = TopBand("Markers", sheet, 268f, 204f, 48f, 48f);
         var grid = markers.gameObject.AddComponent<GridLayoutGroup>();
-        grid.cellSize = new Vector2(160f, 160f);
-        grid.spacing = new Vector2(46f, 24f);
+        grid.cellSize = new Vector2(160f, 204f);
+        grid.spacing = new Vector2(46f, 0f);
         grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
-        grid.constraintCount = 5;
+        grid.constraintCount = MarkerNames.Length;
         grid.childAlignment = TextAnchor.UpperCenter;
-        int cells = s_Emoji.Length + 1;
+        int cells = s_Markers.Length + 1;
         screen.markerCells = new Button[cells];
         screen.markerBackgrounds = new Image[cells];
-        RectTransform blue = Child("Blue Dot", markers);
-        screen.markerCells[0] = MakeButton(blue, s_T.surfaceVariant, 44f, out screen.markerBackgrounds[0]);
-        RectTransform dot = Fixed("Dot", blue, Center, Vector2.zero, new Vector2(64f, 64f));
-        Card(dot, Color.white, 32f, true);
-        Dot("Fill", dot, Center, Vector2.zero, 46f, s_T.primary);
-        for (int i = 1; i < cells; i++)
+        for (int i = 0; i < cells; i++)
         {
-            RectTransform cell = Child($"Emoji {i}", markers);
-            screen.markerCells[i] = MakeButton(cell, s_T.surfaceVariant, 44f, out screen.markerBackgrounds[i]);
-            var emoji = Fixed("Emoji", cell, Center, Vector2.zero, new Vector2(96f, 96f)).gameObject.AddComponent<Image>();
-            emoji.sprite = s_Emoji[i - 1];
-            emoji.preserveAspect = true;
-            emoji.raycastTarget = false;
+            RectTransform cell = Child(MarkerNames[i], markers);
+            screen.markerCells[i] = MakeButton(cell, s_T.surfaceVariant, SmallCorner, out screen.markerBackgrounds[i]);
+            if (i == 0)
+            {
+                RectTransform dot = Fixed("Dot", cell, Center, new Vector2(0f, 22f), new Vector2(64f, 64f));
+                Card(dot, Color.white, 32f, true);
+                Dot("Fill", dot, Center, Vector2.zero, 46f, s_T.primary);
+            }
+            else
+            {
+                var shape = Fixed("Shape", cell, Center, new Vector2(0f, 22f), new Vector2(104f, 104f)).gameObject.AddComponent<Image>();
+                shape.sprite = s_Markers[i - 1];
+                shape.preserveAspect = true;
+                shape.raycastTarget = false;
+            }
+            TextIn(TopBand("Name", cell, 148f, 44f, 8f, 8f), MarkerNames[i], s_SemiBold, 30, s_T.onSurfaceVariant,
+                TextAnchor.MiddleCenter);
         }
 
         // Light, dark, or as the phone is.
-        TextIn(TopBand("Appearance", sheet, 840f, 50f, 48f, 48f), "Appearance", s_SemiBold, 38, s_T.onSurface, TextAnchor.MiddleLeft);
-        RectTransform modes = TopBand("Modes", sheet, 904f, 104f, 48f, 48f);
+        TextIn(TopBand("Appearance", sheet, 516f, 50f, 48f, 48f), "Appearance", s_SemiBold, 38, s_T.onSurface, TextAnchor.MiddleLeft);
+        RectTransform modes = TopBand("Modes", sheet, 580f, 104f, 48f, 48f);
         Rounded(modes, s_T.surfaceVariant, 52f);
         HorizontalLayoutGroup modeRow = HorizontalRow(modes, 8f, TextAnchor.MiddleCenter);
         modeRow.padding = new RectOffset(8, 8, 8, 8);
@@ -78,14 +84,14 @@ public static partial class BuildNavigateScene
                 TextAnchor.MiddleCenter);
         }
 
-        screen.tiltToggle = SwitchRow(sheet, "3D Map", 1032f, "3D map", "Tilt the map and raise the walls",
+        screen.tiltToggle = SwitchRow(sheet, "3D Map", 708f, "3D map", "Tilt the map and raise the walls",
             out _, out _, out screen.switchTrack, out screen.switchKnob);
         // For demos away from the building. The screen names the building and the entrance.
-        screen.pretendToggle = SwitchRow(sheet, "Pretend", 1152f, "Pretend I'm here", "For demos: you're at its entrance",
+        screen.pretendToggle = SwitchRow(sheet, "Pretend", 828f, "Pretend I'm here", "For demos: you're at its entrance",
             out screen.pretendTitle, out screen.pretendDetail, out screen.pretendTrack, out screen.pretendKnob);
 
         // Indoor positioning off, back to GPS: a plain row (NavigationScreen dims it while outdoors).
-        RectTransform left = TopBand("Left Building", sheet, 1272f, 120f, 0f, 0f);
+        RectTransform left = TopBand("Left Building", sheet, 948f, 120f, 0f, 0f);
         screen.leftBuildingButton = FlatButton(left, 0f);
         left.gameObject.AddComponent<CanvasGroup>();
         Text leftTitle = TextIn(TopBand("Title", left, 14f, 50f, 48f, 48f), "I've left the building", s_SemiBold, 38,
@@ -95,12 +101,12 @@ public static partial class BuildNavigateScene
             s_Regular, 32, s_T.onSurfaceVariant, TextAnchor.MiddleLeft);
         BestFit(screen.leftBuildingDetail, 24);
 
-        screen.voiceToggle = SwitchRow(sheet, "Voice", 1392f, "Spoken directions",
+        screen.voiceToggle = SwitchRow(sheet, "Voice", 1068f, "Spoken directions",
             "Read turns aloud and answer when you talk", out _, out _, out screen.voiceTrack, out screen.voiceKnob);
 
         // Where the maps come from, as their licences ask: under everything else, in the small grey of the
-        // settings' detail lines. It ends at 1592, inside the open sheet (1600 high).
-        Text credits = TextIn(TopBand("Credits", sheet, 1520f, 72f, 48f, 48f),
+        // settings' detail lines. It ends at 1268, inside the open sheet (1276 high).
+        Text credits = TextIn(TopBand("Credits", sheet, 1196f, 72f, 48f, 48f),
             "Floor plan: Knight Hacks forge (MIT) · Map data © OpenStreetMap contributors",
             s_Regular, 32, s_T.onSurfaceVariant, TextAnchor.MiddleLeft);
         BestFit(credits, 22);

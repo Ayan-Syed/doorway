@@ -3,7 +3,7 @@ rooms filled by what they are and outlined, the building outlined heavier, casti
 ground. The app draws room numbers and icons on top, so they stay upright as the map turns.
 
 Run after graph.py --export and segment.py: python basemap.py [theme ...]
-The labels, place grid, UI textures and icons are rebuilt every time, whatever themes are named.
+The labels, place grid, UI textures, icons and markers are rebuilt every time, whatever themes are named.
 places.bytes (little-endian): "DWPL", uint16 version (1), uint16 width, uint16 height, uint32 FNV-1a hash of the
 place ids (graph.place_id_hash), then a byte per 5 x 5 px cell, top row first: the place's index + 1, or 0.
 """
@@ -18,6 +18,7 @@ from scipy import ndimage
 
 import graph
 import icons
+import markers
 
 # Kept in step with Theme.cs. ("ground" is never drawn: the outside is transparent and the app paints
 # its own ground or the campus map behind.)
@@ -216,6 +217,7 @@ def main():
     places_and_labels(R, ids, texts, kinds)
     ui_textures()
     icons.app_icons()
+    markers.marker_sprites()
     for theme in themes:
         # Full plan resolution, so it stays sharp zoomed in; the app places it by the plan's extent, not its size.
         render(theme, R, kind, dark).save(os.path.join(graph.DATA_DIR, f"ba1-floor1-map-{theme}.png"), optimize=True)

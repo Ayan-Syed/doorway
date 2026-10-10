@@ -32,7 +32,7 @@ public static partial class BuildNavigateScene
     const string WallsPath = DataFolder + "/ba1-floor1-walls.bytes";
     const string CampusGeometryPath = DataFolder + "/ucf-campus.bytes";
     const string CampusInfoPath = DataFolder + "/ucf-campus.json";
-    const string EmojiFolder = UIFolder + "/Emoji";
+    const string MarkerFolder = UIFolder + "/Markers";
     const string MeshFolder = "Assets/Navigation/Meshes";
     const string ProductName = "Doorway";
     const string DefaultTheme = "iris";
@@ -61,12 +61,10 @@ public static partial class BuildNavigateScene
     const string IconWholeFloor = "";
     const string IconMic = "";
 
-    // The markers Settings offers after the blue dot: Noto Color Emoji pictures (UI/Emoji/LICENSE.txt).
-    static readonly string[] MarkerEmoji =
-    {
-        "1f642", "1f60e", "1f913", "1f393", "1f431", "1f436", "1f422",
-        "1f984", "1f47b", "1f680", "1f525", "26a1", "2694", "1f45f",
-    };
+    // The markers Settings offers after the dot: shapes in the iris palette, UI/Markers/marker-<name>.png
+    // (Tools/ba1-floor1/markers.py). Their names in Settings, the dot's first.
+    static readonly string[] MarkerShapes = { "diamond", "spark", "hex", "shield" };
+    static readonly string[] MarkerNames = { "Dot", "Diamond", "Spark", "Hex", "Shield" };
 
     // The current theme: every helper takes its colours from it, so whichever theme is current when a
     // GameObject is made gives it its colours.
@@ -76,7 +74,7 @@ public static partial class BuildNavigateScene
     static TextAsset s_PlaceMap, s_Walls, s_CampusGeometry, s_CampusInfo;
     static Material s_HighlightMaterial, s_WallMaterial;
     static Sprite s_Pin, s_Cone;
-    static Sprite[] s_Emoji;
+    static Sprite[] s_Markers;
 
     [MenuItem("Navigation/Build Navigate Scene")]
     public static void Build()
@@ -196,10 +194,10 @@ public static partial class BuildNavigateScene
 
         if (!ImportTextures())
             return false;
-        s_Emoji = ImportEmoji();
-        if (s_Pin == null || s_Cone == null || s_RouteMask == null || s_Emoji == null)
+        s_Markers = ImportMarkers();
+        if (s_Pin == null || s_Cone == null || s_RouteMask == null || s_Markers == null)
         {
-            Debug.LogError($"[Navigation] Missing a sprite in {UIFolder} or an emoji in {EmojiFolder}.");
+            Debug.LogError($"[Navigation] Missing a sprite in {UIFolder} or a marker in {MarkerFolder}.");
             return false;
         }
 

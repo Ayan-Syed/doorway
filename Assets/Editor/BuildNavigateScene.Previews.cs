@@ -107,7 +107,7 @@ public static partial class BuildNavigateScene
         return rect;
     }
 
-    // Every screen by day (with an emoji marker) and by night (with the blue dot). Returns how many failed.
+    // Every screen by day (with the shield marker) and by night (with the dot). Returns how many failed.
     static int RenderAll(NavigationScreen screen)
     {
         using (var rig = new PreviewRig(screen))
@@ -250,7 +250,7 @@ public static partial class BuildNavigateScene
             return best;
         }
 
-        // Every screen, into Builds/Previews/<theme>. marker: 0 for the blue dot, n for the nth emoji.
+        // Every screen, into Builds/Previews/<theme>. marker: 0 for the dot, n for the nth shape.
         public int Screens(string theme, int marker)
         {
             m_Folder = Path.Combine(PreviewFolder, theme);

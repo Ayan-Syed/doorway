@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: c23d95568cf89ba49817f49c2f763a9c
+guid: c1a9c52a97d9d964e8ef3addf435549d
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: -6633412340796966544
-    second: emoji_u26a1_0
+      213: 5351835555365048441
+    second: marker-diamond_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -113,13 +113,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: emoji_u26a1_0
+      name: marker-diamond_0
       rect:
         serializedVersion: 2
         x: 0
         y: 0
-        width: 128
-        height: 128
+        width: 256
+        height: 256
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -128,8 +128,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 079ba121f9261f3a0800000000000000
-      internalID: -6633412340796966544
+      spriteID: 970d6d5151a854a40800000000000000
+      internalID: 5351835555365048441
       vertices: []
       indices: 
       edges: []

@@ -42,10 +42,10 @@ public partial class FloorMap : MonoBehaviour, IPointerDownHandler, IPointerUpHa
     public Text pinLabel;
     public GameObject puck;
     public GameObject puckCone;
-    [Tooltip("The user's marker: the blue dot, or an emoji on a disc (SetMarker).")]
+    [Tooltip("The user's marker: the dot, or a shape (SetMarker).")]
     public GameObject puckDot;
     public GameObject puckAvatar;
-    public Image puckEmoji;
+    public Image puckShape;
     [Tooltip("How far off the position may be: a disc on the floor, 100 x 100 at scale 1.")]
     public RectTransform puckAccuracy;
     [Tooltip("The blue dot's fill: TintPuck colours it (and the disc) by how sure the position is.")]
