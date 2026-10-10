@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.XR.ARFoundation;
@@ -180,6 +181,7 @@ public partial class Localizer : MonoBehaviour
         navigator.ResetFloor();
         navigator.DoorPose(door, out Vector2 spot, out float yaw);
         Vector2 camera = CameraXZ;
+        Alternatives(door, spot);
         if (m_Log == null)
             OpenLog();
         m_Log?.Row('n', t);
@@ -187,13 +189,52 @@ public partial class Localizer : MonoBehaviour
         LogXZ(spot);
         m_Log?.Add(yaw, 2);
         LogXZ(camera);
+        m_Log?.Add(m_Alternatives.Count);
+        for (int k = 0; k < m_Alternatives.Count; k++)
+        {
+            LogXZ(m_Alternatives[k]);
+            m_Log?.Add(m_AlternativeYaws[k], 2);
+        }
         m_Log?.EndRow();
-        m_Engine.Snap(t, spot, yaw, camera);
+        m_Engine.Snap(t, spot, yaw, camera, m_Alternatives, m_AlternativeYaws);
         m_SnappedTo = door;
         m_SnappedAt = Time.unscaledTime;
         Publish();
         ApplyIndoors();
     }
+
+    // The doors a snap at this one might really have been at (the user picked the wrong one, or GPS suggested it):
+    // the other entrances if it's an entrance, else the doors within AlternativeReach. With their spots and the yaw
+    // each would give, the phone facing as it does now (SyntheticWalks.SnapAlternatives models the same).
+    void Alternatives(PlanDoor door, Vector2 spot)
+    {
+        m_Alternatives.Clear();
+        m_AlternativeYaws.Clear();
+        FloorPlan plan = navigator.Plan;
+        if (plan == null)
+            return;
+        bool entrance = plan.places.Any(p => p.kind == "exit" && p.doors.Contains(door));
+        foreach (PlanPlace place in plan.places)
+        {
+            if (entrance && place.kind != "exit")
+                continue;
+            foreach (PlanDoor other in place.doors)
+            {
+                if (other == door)
+                    continue;
+                navigator.DoorPose(other, out Vector2 at, out float yaw);
+                float distance = Vector2.Distance(at, spot);
+                if (distance < 0.5f || !entrance && distance > AlternativeReach)
+                    continue;
+                m_Alternatives.Add(at);
+                m_AlternativeYaws.Add(yaw);
+            }
+        }
+    }
+
+    const float AlternativeReach = 12f;
+    readonly List<Vector2> m_Alternatives = new List<Vector2>();
+    readonly List<float> m_AlternativeYaws = new List<float>();
 
     /// <summary>Snapped at this door a moment ago: a Begin there is the same start, not a second one.</summary>
     public bool JustSnappedTo(PlanDoor door) => door == m_SnappedTo && Time.unscaledTime - m_SnappedAt < SameSnapSeconds;

@@ -25,7 +25,8 @@ using UnityEngine;
 //
 // The Localizer's logs (one per indoor session, from the snap to going outdoors) hold the raw inputs of its engine,
 // so ReplayEvaluator can run them again exactly (LocalizerEngine, the same code and seed):
-//   n,t,door,x,z,yaw,camx,camz           snap: the door spot, the plan's yaw in the AR world, the camera (world x, z)
+//   n,t,door,x,z,yaw,camx,camz,k,(x,z,yaw)...   snap: the door spot, the plan's yaw in the AR world, the camera
+//                                        (world x, z), and the k other doors it might have been (spot and yaw)
 //   l,t / o,t                            relocalize asked / gone outdoors
 //   a,t,tracking,cx,cy,cz,yaw            each frame: tracking 0/1, the camera's world position and flat yaw
 //   d,t,source,n,x,z,...                 a depth scan (depth or points): n world (x, z) points, 2 decimals

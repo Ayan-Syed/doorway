@@ -15,7 +15,7 @@ using UnityEngine;
 // share of time Localized, wall violations (an estimate on unwalkable floor: must be 0) and relocalizations (times
 // the state went Lost). Walks are split by their place in name order: odd places tune, even places test; tune on
 // the one, report the other.
-public static class ReplayEvaluator
+public static partial class ReplayEvaluator
 {
     public sealed class Walk
     {
@@ -132,6 +132,8 @@ public static class ReplayEvaluator
         readonly LocalizerEngine m_Engine;
         readonly Vector2[] m_Scan = new Vector2[ScanMatcher.MaxPoints + ScanBuffer.Target];
         readonly List<WallObservation> m_Planes = new List<WallObservation>();
+        readonly List<Vector2> m_Alternatives = new List<Vector2>();
+        readonly List<float> m_AlternativeYaws = new List<float>();
 
         public Feeder(LocalizerEngine engine) => m_Engine = engine;
 
@@ -147,9 +149,19 @@ public static class ReplayEvaluator
                 return false;
             switch (c[0])
             {
-                case "n":   // n,t,door,x,z,yaw,camx,camz
-                    m_Engine.Snap(t, V(c, 3), F(c[5]), V(c, 6));
+                case "n":   // n,t,door,x,z,yaw,camx,camz[,k,(x,z,yaw)...]
+                {
+                    m_Alternatives.Clear();
+                    m_AlternativeYaws.Clear();
+                    int k = c.Length > 8 ? int.Parse(c[8], CultureInfo.InvariantCulture) : 0;
+                    for (int j = 0; j < k; j++)
+                    {
+                        m_Alternatives.Add(V(c, 9 + 3 * j));
+                        m_AlternativeYaws.Add(F(c[11 + 3 * j]));
+                    }
+                    m_Engine.Snap(t, V(c, 3), F(c[5]), V(c, 6), m_Alternatives, m_AlternativeYaws);
                     break;
+                }
                 case "l":
                     m_Engine.Relocalize(t);
                     break;

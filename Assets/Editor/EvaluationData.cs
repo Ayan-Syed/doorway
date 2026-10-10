@@ -51,30 +51,8 @@ public sealed class EvaluationData
                     d.wallSegments.Add((a, b));
             }
         }
-        var doors = d.plan.places.SelectMany(p => p.doors).ToList();
-        d.doorSpots = doors.Select(door => d.plan.NodePosition(door.node)).ToArray();
-
-        // Routes between door pairs (seeded, so always the same), 25 m or longer.
-        var router = new Router(d.plan, d.walkable);
-        var random = new System.Random(4);
-        d.routes = new List<Vector2[]>();
-        for (int tries = 0; d.routes.Count < 30 && tries < 2000; tries++)
-        {
-            PlanDoor from = doors[random.Next(doors.Count)];
-            PlanPlace to = d.plan.places[random.Next(d.plan.places.Count)];
-            Route route = router.FindRoute(from.node, to);
-            if (route != null && route.length >= 25f)
-                d.routes.Add(route.points.ToArray());
-        }
-        d.entranceRoutes = new List<Vector2[]>();
-        var exits = d.plan.places.Where(p => p.kind == "exit").SelectMany(p => p.doors).ToList();
-        for (int tries = 0; exits.Count > 0 && d.entranceRoutes.Count < 12 && tries < 2000; tries++)
-        {
-            PlanDoor from = exits[random.Next(exits.Count)];
-            Route route = router.FindRoute(from.node, d.plan.places[random.Next(d.plan.places.Count)]);
-            if (route != null && route.length >= 25f)
-                d.entranceRoutes.Add(route.points.ToArray());
-        }
+        d.doorSpots = d.plan.places.SelectMany(p => p.doors).Select(door => d.plan.NodePosition(door.node)).ToArray();
+        SyntheticWalks.Routes(d.plan, d.walkable, out d.routes, out d.entranceRoutes);
         s_Loaded = d;
         return d;
     }
@@ -88,6 +66,24 @@ public sealed class EvaluationData
             List<string> lines = SyntheticWalks.Walk(routes[i % routes.Count], walkable, wallSegments, plan.signs, doorSpots,
                 SyntheticWalks.Options.Default(100 + i));
             walks.Add(new ReplayEvaluator.Walk { name = $"synthetic-{i:D2}", lines = lines });
+        }
+        return walks;
+    }
+
+    /// <summary>The floor as the stress walks see it: doors with their directions, exits, every route.</summary>
+    public SyntheticWalks.Floor StressFloor() =>
+        SyntheticWalks.StressFloor(plan, walkable, field, wallSegments, routes.Concat(entranceRoutes).ToList());
+
+    /// <summary>count stress walks, seeds first.. on, the tiers in turn (seed % 3).</summary>
+    public List<ReplayEvaluator.StressWalk> StressWalkSet(int count, int first = 0)
+    {
+        SyntheticWalks.Floor floor = StressFloor();
+        var walks = new List<ReplayEvaluator.StressWalk>();
+        for (int seed = first; seed < first + count; seed++)
+        {
+            var tier = (SyntheticWalks.Tier)(seed % 3);
+            List<string> lines = SyntheticWalks.Stress(floor, tier, seed, out SyntheticWalks.StressInfo info);
+            walks.Add(new ReplayEvaluator.StressWalk { name = $"stress-{seed:D4}", tier = tier, info = info.ToString(), lines = lines });
         }
         return walks;
     }

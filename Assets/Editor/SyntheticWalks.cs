@@ -12,7 +12,7 @@ using UnityEngine;
 // (half with depth, half by digit size), a tracking loss with steps and a compass, and checkpoints at every bend.
 // The truth goes in too, five times a second, as T,t,x,z rows (the evaluator skips them; the tests use them).
 // Seeded: the same seed makes the same walks.
-public static class SyntheticWalks
+public static partial class SyntheticWalks
 {
     public struct Options
     {

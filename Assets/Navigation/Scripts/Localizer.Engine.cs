@@ -44,16 +44,37 @@ public sealed class LocalizerEngine
     // RampScans updates.
     const float FirstScan = 0.3f;
     const int RampScans = 10;
+    // A snap may have been at another door (the user picked the wrong one, or GPS suggested it): this share of the
+    // particles goes to the alternatives (other entrances, or doors nearby), the rest to the door snapped at.
+    const float AlternativeShare = 0.15f;
+    // And the door is often tapped a few steps on from it: this share of the particles goes anywhere in sight of the
+    // spot from NearFrom to NearReach metres away, so a walk along a plain corridor can't settle a few metres out.
+    const float NearShare = 0.15f, NearFrom = 1f, NearReach = 4f;
+    // Localized only on evidence: this many scans that fit (a share of points near a wall of at least FitShare) or
+    // walls matched or a plate, and almost all the weight (Wide of it) within twice LocalizedSpread: a snap alone, or
+    // a cloud still split between two doors, isn't a position.
+    const int EvidenceNeeded = 3;
+    const float FitShare = 0.35f, Wide = 0.95f;
     // States, with hysteresis: Localized needs the cloud tight and confident for SettleSeconds; it's left again only
-    // once clearly loose for as long. Lost is a cloud wider than LostSpread, or two wipe-outs within 30 m walked, or
-    // a scan that fits nowhere for MisfitSeconds. Only a sign gets out of Lost: in a building of look-alike
-    // hallways, walls and scans can settle on the wrong one with every sign of confidence (seen in the synthetic
-    // relocalizations), so the user is asked for a room number instead.
+    // once clearly loose for as long. Lost is a cloud wider than LostSpread for WideSeconds (not for a moment: a
+    // snap's other doors and a sign's rings widen it on purpose, and the next scans narrow it again), or two wipe-outs within 30 m walked, or
+    // a scan that fits nowhere for MisfitSeconds. A sign gets out of Lost at once; the walls and the scan only to
+    // Converging, after FoundSeconds of a tight cloud, and from there Localized needs a sign: in a building of
+    // look-alike hallways the walls can settle on the wrong one with every sign of confidence (seen in the synthetic
+    // relocalizations), so being sure again takes a room number.
     public const float LocalizedSpread = 1.5f, LocalizedConfidence = 0.6f;
     public const float LooseSpread = 2.5f, LooseConfidence = 0.4f;
+    // And the heading: a cloud tight in position but 15 degrees wide in heading walks off a metre every 4 m.
+    public const float LocalizedHeadingSpread = 8f, LooseHeadingSpread = 15f;
     public const float LostSpread = 6f;
     public const int LostRecoveries = 2;
-    const float SettleSeconds = 1f;
+    const float SettleSeconds = 1f, FoundSeconds = 5f, WideSeconds = 5f;
+    // Steps alone (ARCore not tracking) for this long: not sure any more, until ARCore and the scans are back. A turn
+    // the steps don't see (no compass yet, or a compass the building's steel turns) puts them metres out in seconds.
+    const float BlindSeconds = 2f;
+    // The estimate jumping this far in one update (a mode switch) starts the settling again; a sign moving it this far
+    // needs a second to agree.
+    const float ModeJump = 2f, SignMove = 2f;
     // A sign the filter can't explain, while sure of itself: probably a misread, but its rings get this share of
     // every resample for RingSeconds, to win if they fit the scan and the walls better (Augmented MCL, biased).
     const float DoubtInjection = 0.05f;
@@ -73,6 +94,10 @@ public sealed class LocalizerEngine
     // ROS's amcl does (update_min_d, update_min_a): the same view again isn't new evidence, and counting it again
     // and again would make the filter surer than it is.
     const float UpdateDistance = 0.15f, UpdateAngle = 10f;
+    // The scan only every ScanDistance walked (or UpdateAngle turned): its buffer holds two seconds of points, some
+    // 2.5 m of walking, so weighed every 15 cm each point would count a dozen times or more over, and the clutter and
+    // plan errors in it with it. The stress walks drew tight on wrong poses half as often with this.
+    const float ScanDistance = 0.5f;
 
     readonly FloorPlan m_Plan;
     readonly Walkable m_Walkable;
@@ -86,12 +111,16 @@ public sealed class LocalizerEngine
     Vector2 m_Camera, m_SnapCamera, m_SnapSpot;
     float m_CameraYaw = float.NaN, m_SnapYaw;
     bool m_Tracking;
-    double m_Time, m_SureSince = -1, m_LooseSince = -1, m_MisfitSince = -1, m_RingUntil = -1;
+    double m_Time, m_SureSince = -1, m_LooseSince = -1, m_MisfitSince = -1, m_RingUntil = -1, m_WideSince = -1, m_UntrackedSince = -1;
     float m_CompassSin, m_CompassCos;
     int m_CompassCount;
     Vector2 m_LastWalk;
     Vector2 m_ScanCamera, m_WallsCamera;
-    int m_Scans;
+    int m_Scans, m_Evidence;
+    Vector2 m_LastEstimate;
+    bool m_HadEstimate;
+    bool m_NeedsSign;
+    string m_PlacedBy;   // the plate that last placed the cloud: it can't confirm itself   // been Lost since the last sign: Localized again only after one
     float m_ScanYaw = float.NaN, m_WallsYaw = float.NaN;
 
     public LocalizerState State { get; private set; } = LocalizerState.Outdoors;
@@ -106,7 +135,7 @@ public sealed class LocalizerEngine
     /// <summary>The radius round the estimate holding 68% of the weight, metres.</summary>
     public float Spread { get; private set; }
     public float Confidence { get; private set; }
-    /// <summary>The compass-to-plan offset is learnt (steps can follow the compass).</summary>
+    /// <summary>The compass-to-ARCore-world offset is learnt (steps can follow the compass).</summary>
     public bool CompassKnown => m_CompassCount >= CompassSamples;
     public float CompassOffset => Mathf.Atan2(m_CompassSin, m_CompassCos) * Mathf.Rad2Deg;
     public int WallsMatched { get; private set; }
@@ -149,17 +178,35 @@ public sealed class LocalizerEngine
 
     // Standing just inside a door with your back to it: the plan's spot there is under the camera (world x, z), the
     // plan turned by baseYaw (Navigator's AlignTo works it out from the door and where the phone faces).
-    public void Snap(double t, Vector2 spot, float baseYaw, Vector2 camera)
+    public void Snap(double t, Vector2 spot, float baseYaw, Vector2 camera) => Snap(t, spot, baseYaw, camera, null, null);
+
+    // With the other doors the snap might really have been at (their spots, and the plan's yaw if it was there).
+    public void Snap(double t, Vector2 spot, float baseYaw, Vector2 camera, IReadOnlyList<Vector2> alternatives,
+        IReadOnlyList<float> alternativeYaws)
     {
         m_Time = t;
         m_SnapSpot = spot;
         m_SnapYaw = baseYaw;
         m_SnapCamera = m_Camera = camera;
         m_Tracking = true;
-        m_Filter.SetCount(SnapParticles);
+        int others = alternatives?.Count ?? 0, count = SnapParticles;
+        m_Filter.SetCount(count);
         m_Filter.Reset(spot, camera, baseYaw, SnapSpread, SnapHeadingSpread, SnapHeadingLimit, true);
         m_Scans = 0;
-        m_SureSince = m_LooseSince = m_MisfitSince = -1;
+        m_Evidence = 0;
+        m_NeedsSign = false;
+        m_HadEstimate = false;
+        int near = Mathf.RoundToInt(count * NearShare);
+        m_Filter.SeedNear(0, near, spot, baseYaw, NearFrom, NearReach, SnapHeadingSpread);
+        if (others > 0)
+        {
+            m_Filter.FreeHeading();   // another door faces another way
+            int each = Mathf.Max(1, Mathf.RoundToInt(count * AlternativeShare / others));
+            for (int k = 0; k < others; k++)
+                m_Filter.SeedHypothesis(count - each * (k + 1), each, alternatives[k], alternativeYaws[k], SnapSpread,
+                    SnapHeadingSpread);
+        }
+        m_SureSince = m_LooseSince = m_MisfitSince = m_WideSince = -1;
         m_RingUntil = -1;
         m_ScanYaw = m_WallsYaw = float.NaN;
         Position = m_Config.raw ? spot : m_Filter.Estimate;
@@ -175,6 +222,7 @@ public sealed class LocalizerEngine
             return;
         m_Filter.Scatter(m_Filter.Estimate, RelocalizeRadius, true);
         m_Scans = 0;
+        m_Evidence = 0;
         Measure();
         SetState(LocalizerState.Lost, "asked");
     }
@@ -194,6 +242,10 @@ public sealed class LocalizerEngine
         if (tracking && m_Tracking && (camera - m_Camera).sqrMagnitude > 0.0025f)
             m_LastWalk = camera - m_Camera;
         m_Camera = camera;
+        if (tracking)
+            m_UntrackedSince = -1;
+        else if (m_UntrackedSince < 0)
+            m_UntrackedSince = t;
         m_Tracking = tracking;
         if (tracking)
             m_CameraYaw = cameraYaw;
@@ -221,12 +273,14 @@ public sealed class LocalizerEngine
     public bool Scan(double t, Vector2[] points, int count)
     {
         m_Time = t;
-        if (!Active || !m_Config.depth || m_Scan == null || !Moved(ref m_ScanCamera, ref m_ScanYaw))
+        if (!Active || !m_Config.depth || m_Scan == null || !Moved(ref m_ScanCamera, ref m_ScanYaw, ScanDistance))
             return false;
         float strength = Mathf.Min(1f, FirstScan + (1f - FirstScan) * m_Scans / RampScans);
         if (!m_Scan.Weigh(m_Filter, points, count, strength))
             return false;
         m_Scans++;
+        if (m_Scan.LastHitShare >= FitShare)
+            m_Evidence++;
         // A scan that fits nowhere near the cloud for long, while sure: it's somewhere else.
         bool misfit = m_Scan.LastPoints >= MisfitPoints && m_Scan.LastHitShare < MisfitShare;
         if (!misfit || State != LocalizerState.Localized)
@@ -244,6 +298,8 @@ public sealed class LocalizerEngine
         if (!Active || !m_Config.wallPlanes || m_Walls == null || !Moved(ref m_WallsCamera, ref m_WallsYaw))
             return WallsMatched;
         WallsMatched = m_Walls.Weigh(m_Filter, walls, m_Camera);
+        if (WallsMatched > 0)
+            m_Evidence++;
         Measure();
         return WallsMatched;
     }
@@ -262,15 +318,26 @@ public sealed class LocalizerEngine
         Vector2 toSign = camera + PositionFilter.HeadingVector(worldBearing) * worldRange - m_Filter.Camera;
         float bearing = PositionFilter.Heading(toSign), range = toSign.magnitude;
         Sighted result;
+        bool seeded;
+        bool tight = m_Filter.Radius(0.68f) < LooseSpread;
+        Vector2 was = m_Filter.Estimate;
         // Augmented MCL's random particles go round this sign for a while (Probabilistic Robotics, Table 8.3, biased).
         m_Filter.SetRing(bearing, range, sigma, sign.at, sign.normal);
         m_RingUntil = t + RingSeconds;
         if (State == LocalizerState.Lost)
         {
-            // Lost: the sign alone says where (on its rings), any heading; then it's weighed as usual.
-            m_Filter.SeedRing(bearing, range, sigma, sign.at, sign.normal);
+            // Lost: a tight cloud is weighed against it first (it may well be right already, just not trusted); if
+            // nothing in it could have seen the sign, the filter starts again on its rings.
+            // A wide cloud has too few particles on the sign's rings to say where on them: those are sampled afresh.
+            seeded = !tight;
+            if (!tight || !m_Filter.AddSignObservation(bearing, range, sigma, sign.at, sign.normal))
+            {
+                m_Filter.SeedRing(bearing, range, sigma, sign.at, sign.normal);
+                m_Filter.AddSignObservation(bearing, range, sigma, sign.at, sign.normal);
+                seeded = true;
+            }
+            seeded |= m_Filter.SignSeeded;
             m_Scans = 0;
-            m_Filter.AddSignObservation(bearing, range, sigma, sign.at, sign.normal);
             result = Sighted.Placed;
         }
         else
@@ -283,9 +350,28 @@ public sealed class LocalizerEngine
                     SetState(LocalizerState.Converging, "doubt");
                 return Sighted.Ignored;
             }
-            result = Sighted.Used;
+            // A sign that moved the estimate far chose a minor mode (a snap's other door, a far side of the cloud):
+            // as much a single witness as one that started the cloud again.
+            seeded = m_Filter.SignSeeded || (m_Filter.Estimate - was).sqrMagnitude > SignMove * SignMove;
+            result = seeded ? Sighted.Placed : Sighted.Used;
         }
         SignUsed?.Invoke(text);
+        // A sign that agrees with a cloud that was already sure of itself confirms it. One that had to choose (a cloud
+        // started again, moved, or wide) fixes a ring round the sign, and every heading has a place on it: the
+        // scans or the walls have to agree with the choice before it's sure.
+        bool chose = seeded || m_NeedsSign;
+        m_Evidence = chose ? 0 : m_Evidence + EvidenceNeeded;
+        // One plate that put the cloud somewhere new is a single witness (plates are misread, posters look like
+        // plates): Localized waits for a second that agrees with where the first put it, and another plate, not the
+        // same one read again.
+        string key = text.Trim();
+        if (seeded)
+            m_PlacedBy = key;
+        m_NeedsSign = seeded || (m_NeedsSign && key == m_PlacedBy);
+        if (!seeded && State != LocalizerState.Lost)
+            Doubt(false);   // a sign that agrees with the cloud settles an earlier one that didn't
+        if (seeded && State == LocalizerState.Localized)
+            SetState(LocalizerState.Converging, "placed");
         if (State == LocalizerState.Lost)
         {
             m_SureSince = m_LooseSince = -1;
@@ -296,14 +382,14 @@ public sealed class LocalizerEngine
     }
 
     // The compass (degrees clockwise from north, where the camera looks) while ARCore tracks: learns the offset from
-    // compass to plan, for steps taken blind.
+    // compass to ARCore's world, for steps taken blind. To the world, not the plan: that needs no position fix, so it's
+    // learnt from the first seconds, and each particle turns a blind step onto the plan by its own heading.
     public void Compass(double t, float compass)
     {
         m_Time = t;
-        if (!Active || !m_Tracking || float.IsNaN(compass) || float.IsNaN(m_CameraYaw) || State != LocalizerState.Localized)
+        if (!Active || !m_Tracking || float.IsNaN(compass) || float.IsNaN(m_CameraYaw))
             return;
-        float plan = m_CameraYaw - Yaw;
-        float offset = Mathf.DeltaAngle(compass, plan) * Mathf.Deg2Rad;
+        float offset = Mathf.DeltaAngle(compass, m_CameraYaw) * Mathf.Deg2Rad;
         float k = m_CompassCount == 0 ? 1f : CompassLearning;
         m_CompassSin += k * (Mathf.Sin(offset) - m_CompassSin);
         m_CompassCos += k * (Mathf.Cos(offset) - m_CompassCos);
@@ -316,7 +402,7 @@ public sealed class LocalizerEngine
         m_Time = t;
         if (!Active || !m_Config.steps || m_Tracking)
             return;
-        float heading, sigma;
+        float heading, sigma;   // in ARCore's world
         if (!float.IsNaN(compass) && CompassKnown)
         {
             heading = compass + CompassOffset;
@@ -325,15 +411,14 @@ public sealed class LocalizerEngine
         else if (m_LastWalk.sqrMagnitude > 0f)
         {
             // No compass yet: carry on the way the last tracked walk went.
-            heading = PositionFilter.Heading(PositionFilter.ToPlan(m_LastWalk, Yaw));
+            heading = PositionFilter.Heading(m_LastWalk);
             sigma = UnknownHeadingSigma;
         }
         else
         {
             return;
         }
-        m_Filter.StepBlind(PositionFilter.HeadingVector(heading) * (length > 0f ? length : StepLength), StepLengthSigma,
-            sigma);
+        m_Filter.StepBlindWorld(heading, length > 0f ? length : StepLength, StepLengthSigma, sigma);
         Measure();
     }
 
@@ -343,9 +428,11 @@ public sealed class LocalizerEngine
     bool Active => State != LocalizerState.Outdoors && !m_Config.raw;
 
     // Moved or turned enough since this signal last weighed (and if so, now is the new last time).
-    bool Moved(ref Vector2 camera, ref float yaw)
+    bool Moved(ref Vector2 camera, ref float yaw) => Moved(ref camera, ref yaw, UpdateDistance);
+
+    bool Moved(ref Vector2 camera, ref float yaw, float distance)
     {
-        if (!float.IsNaN(yaw) && (m_Camera - camera).sqrMagnitude < UpdateDistance * UpdateDistance &&
+        if (!float.IsNaN(yaw) && (m_Camera - camera).sqrMagnitude < distance * distance &&
             Mathf.Abs(Mathf.DeltaAngle(yaw, m_CameraYaw)) < UpdateAngle)
             return false;
         camera = m_Camera;
@@ -358,14 +445,20 @@ public sealed class LocalizerEngine
     {
         if (m_Config.raw || State == LocalizerState.Outdoors)
             return;
+        Vector2 previous = m_Filter.Estimate;
+        bool jumped = m_HadEstimate && (previous - m_LastEstimate).sqrMagnitude > ModeJump * ModeJump;
+        m_LastEstimate = previous;
+        m_HadEstimate = true;
         Position = m_Tracking ? m_Filter.Current(m_Camera) : m_Filter.Estimate;
         if (!float.IsNaN(m_CameraYaw))
             Heading = Mathf.DeltaAngle(0f, m_CameraYaw - m_Filter.Yaw);
         Spread = m_Filter.Radius(0.68f);
         Confidence = m_Filter.Confidence;
 
-        bool sure = Spread < LocalizedSpread && Confidence > LocalizedConfidence;
-        bool loose = Spread > LooseSpread || Confidence < LooseConfidence;
+        bool blind = m_UntrackedSince >= 0 && m_Time - m_UntrackedSince >= BlindSeconds;
+        bool sure = Spread < LocalizedSpread && Confidence > LocalizedConfidence && !jumped && m_Tracking &&
+                    m_Filter.HeadingSpread < LocalizedHeadingSpread;
+        bool loose = Spread > LooseSpread || Confidence < LooseConfidence || m_Filter.HeadingSpread > LooseHeadingSpread;
         if (!sure)
             m_SureSince = -1;
         else if (m_SureSince < 0)
@@ -377,18 +470,43 @@ public sealed class LocalizerEngine
 
         if (State != LocalizerState.Lost)
         {
-            if (Spread > LostSpread)
+            if (Spread <= LostSpread)
+            {
+                m_WideSince = -1;
+            }
+            else if (m_WideSince < 0)
+            {
+                // Wide even for a moment: whichever part of it wins, being sure again takes a sign.
+                m_WideSince = m_Time;
+                m_NeedsSign = true;
+                if (State == LocalizerState.Localized)
+                    SetState(LocalizerState.Converging, "wide");
+            }
+            if (m_WideSince >= 0 && m_Time - m_WideSince >= WideSeconds)
                 SetState(LocalizerState.Lost, "spread");
             else if (m_Filter.RecentRecoveries >= LostRecoveries)
                 SetState(LocalizerState.Lost, "walls");
             else if (m_MisfitSince >= 0 && m_Time - m_MisfitSince >= MisfitSeconds)
                 SetState(LocalizerState.Lost, "scan");
-            else if (State == LocalizerState.Converging && m_SureSince >= 0 && m_Time - m_SureSince >= SettleSeconds)
+            else if (State == LocalizerState.Converging && m_SureSince >= 0 && m_Time - m_SureSince >= SettleSeconds &&
+                     m_Evidence >= EvidenceNeeded && !m_NeedsSign && !Doubting &&
+                     m_Filter.Radius(Wide) < 2f * LocalizedSpread)
                 SetState(LocalizerState.Localized, "sure");
             else if (State == LocalizerState.Localized && m_LooseSince >= 0 && m_Time - m_LooseSince >= SettleSeconds)
                 SetState(LocalizerState.Converging, "loose");
+            else if (State == LocalizerState.Localized && jumped)
+                SetState(LocalizerState.Converging, "jumped");
+            else if (State == LocalizerState.Localized && blind)
+                SetState(LocalizerState.Converging, "blind");
+        }
+        else if (m_SureSince >= 0 && m_Time - m_SureSince >= FoundSeconds && m_Evidence >= EvidenceNeeded)
+        {
+            SetState(LocalizerState.Converging, "found");
         }
     }
+
+    // A sign said otherwise a moment ago (its rings still take particles): not sure until it agrees or times out.
+    bool Doubting => m_Filter.MinimumInjection > 0f && m_Filter.HasRing;
 
     // Doubting the cloud: the last sign's rings get DoubtInjection of every resample, Lost or not.
     void Doubt(bool on)
@@ -404,14 +522,20 @@ public sealed class LocalizerEngine
         if (state == LocalizerState.Lost)
         {
             Relocalizations++;
+            m_NeedsSign = true;
+            m_PlacedBy = null;
+            m_Evidence = 0;
             m_Filter.FreeHeading();
             m_MisfitSince = -1;
         }
         if (State == LocalizerState.Lost)
             m_Filter.ForgetRecoveries();   // out of Lost: the wipe-outs that put it there are history
         // Augmented MCL's random particles only while lost or doubting (see PositionFilter.AllowInjection).
+        if (State == LocalizerState.Localized)
+            m_SureSince = -1;   // doubted or loose: sure again takes SettleSeconds afresh
         State = state;
-        Doubt(m_Filter.MinimumInjection > 0f && m_Filter.HasRing);
+        // Sure again: the doubt is settled, and a sign's rings stop taking particles from a cloud that fits.
+        Doubt(state != LocalizerState.Localized && Doubting);
         StateChanged?.Invoke(state, why);
     }
 }

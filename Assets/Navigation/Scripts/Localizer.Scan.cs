@@ -7,8 +7,9 @@ using UnityEngine;
 // keeps people, furniture and glass from dominating; z_max (no return) doesn't apply, since depth pixels without a
 // reading are dropped before they get here. The points are subsampled (§6.3.4) and the product over them tempered:
 // points 10 cm apart on one wall aren't independent readings, and the same points come round again in the next
-// updates, so the whole scan counts as Strength readings per update. Without that the cloud would collapse onto
-// one guess in a hallway where the scan can't tell positions along it apart.
+// updates, so the whole scan counts as Strength readings per update (and the engine weighs it only every half metre
+// walked). Without that the cloud would collapse onto one guess in a hallway where the scan can't tell positions along
+// it apart.
 // The likelihood field alone ignores what lies between the camera and a point, and in a building full of walls a
 // turned, shifted pose can put every point near some wall. So each point's ray is also checked at two places along
 // it: a ray that passes through a wall on the way (a point "seen" through a wall) scores like an outlier at best,
@@ -25,7 +26,7 @@ public sealed class ScanMatcher
     public const int MinPoints = 12;
     /// <summary>A full scan counts as this many independent readings per update; one with fewer than FullScan
     /// points as proportionally fewer (an atrium with little in range says little).</summary>
-    public const float Strength = 4f;
+    public const float Strength = 3f;
     const int FullScan = 100;
     // The most one update may change any weight by, in log terms.
     const float MaxSpan = 10f;
@@ -34,6 +35,8 @@ public sealed class ScanMatcher
     // Where along each ray it's checked for a wall in the way (shares of the range), and what such a point scores.
     const float ThroughA = 0.5f, ThroughB = 0.8f;
     const float ThroughWall = 0.05f;
+    // A scan is trusted from none, its best pose explaining FitFloor of its points, to all at FitFull (see Weigh).
+    const float FitFloor = 0.3f, FitFull = 0.9f;
 
     readonly DistanceField m_Field;
     readonly float[] m_Table = new float[DistanceField.MaxCentimetres + 1];
@@ -49,6 +52,10 @@ public sealed class ScanMatcher
     public float LastBestMean { get; private set; }
     /// <summary>The best particle's share of points within 30 cm of a wall.</summary>
     public float LastHitShare { get; private set; }
+    /// <summary>How much the last scan was trusted (see Weigh).</summary>
+    public float LastTrust { get; private set; }
+    /// <summary>Scans weighed so far.</summary>
+    public int Updates { get; private set; }
     /// <summary>The weighted geometric mean of the per-point likelihood: what Augmented MCL averages.</summary>
     public float LastAverage { get; private set; }
 
@@ -128,6 +135,14 @@ public sealed class ScanMatcher
             return false;
         LastAverage = average;
         Statistics(filter, best, n);
+        // A scan even the best pose explains poorly (boxes, people, glass, walls that aren't where the plan has them)
+        // says less: its outliers come in clumps that z_rand, made for scattered ones, doesn't cover, and a clump
+        // that happens to line up with another wall pulls the cloud there. So it's weighed in proportion to how much
+        // of it the best pose explains, from none at FitFloor to all at FitFull.
+        float trust = Mathf.Clamp01((LastHitShare - FitFloor) / (FitFull - FitFloor));
+        LastTrust = trust;
+        for (int i = 0; i < particles; i++)
+            m_LogLikelihood[i] *= trust;
         // Table 8.3: the averages see the measurement's likelihood under the prediction, before resampling.
         filter.Reweight(m_LogLikelihood, MaxSpan);
         filter.ReportLikelihood(average);
@@ -153,6 +168,7 @@ public sealed class ScanMatcher
         }
         LastBestMean = distance / n;
         LastHitShare = hits / (float)n;
+        Updates++;
     }
 }
 

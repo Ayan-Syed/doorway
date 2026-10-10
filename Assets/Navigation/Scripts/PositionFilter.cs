@@ -56,9 +56,11 @@ public sealed class PositionFilter
     // Roughening (Gordon, Salmond & Smith, IEE Proc. F, 1993): a little jitter after each resample, so copies of one
     // particle spread out again, and after each measurement update (Reweight), so a cloud that has drawn tight on a
     // wrong heading while the phone stands still (no motion noise, no resample) can still slide to the right one.
-    // The heading jitter follows the cloud's own heading spread, between these bounds.
+    // The heading jitter follows the cloud's own heading spread, between these bounds: a tight cloud gets little, as
+    // the jitter is a random walk on the heading offset and ARCore's own drifts only a few degrees a minute (with ten
+    // updates a second, half a degree each would walk it 12 degrees a minute, and biased scans then pull it along).
     const float RoughenPosition = 0.03f, RoughenHeading = 0.75f, RoughenScale = 0.002f;
-    const float UpdateRoughenPosition = 0.02f, MinUpdateRoughen = 0.5f, MaxUpdateRoughen = 2f, RoughenShare = 0.5f;
+    const float UpdateRoughenPosition = 0.02f, MinUpdateRoughen = 0.1f, MaxUpdateRoughen = 2f, RoughenShare = 0.5f;
     const float MaxRegainStep = 5f;
     const float RegainSpread = 1.5f, RegainHeadingSpread = 6f;
     const float JumpSpread = 0.5f, JumpHeadingSpread = 3f;
@@ -83,6 +85,10 @@ public sealed class PositionFilter
     // Walking blind (steps, no camera): back with tracking, the gap ARCore reports isn't walked again, only loosened.
     const float BlindRegainSpread = 0.4f, BlindRegainHeadingSpread = 3f;
     const float NearEstimate = 1f;
+    // The estimate's mode: grid cells (metres), the mean-shift window (metres) and passes.
+    const float ModeCell = 1.5f, ModeReach = 3f;
+    const int ModeShifts = 3;
+    readonly Dictionary<long, float> m_ModeCells = new Dictionary<long, float>();
     const int SeedTries = 12;
 
     readonly Walkable m_Walkable;
@@ -137,6 +143,9 @@ public sealed class PositionFilter
     /// <summary>The heading offsets' circular standard deviation, degrees.</summary>
     public float HeadingSpread { get; private set; }
     public int Recoveries { get; private set; }
+
+    /// <summary>Whether the last sign observation started the cloud again on the sign's rings.</summary>
+    public bool SignSeeded { get; private set; }
     public int RecoveriesInARow { get; private set; }
     /// <summary>Wipe-outs (every particle in a wall) in the last RecentWalk metres walked: two or more, and the walk
     /// doesn't fit the building from where the filter thinks it started.</summary>
@@ -323,6 +332,42 @@ public sealed class PositionFilter
         UpdateEstimate();
     }
 
+    // Particles first..first+count-1 moved to another hypothesis: round at (plan), the plan turned by yaw, spread as
+    // a snap is. For a snap that may have been at another door: the walls and the scan then choose.
+    public void SeedHypothesis(int first, int count, Vector2 at, float yaw, float positionSpread, float headingSpread)
+    {
+        Vector2 centre = OnFloor(at, 3f, at);
+        for (int i = first; i < first + count && i < m_Count; i++)
+        {
+            Seed(i, centre, positionSpread, 0f, 0f, 1f, StartScaleSpread);
+            m_Heading[i] = Bound(yaw - BaseYaw + ((float)m_Random.NextDouble() * 2f - 1f) * headingSpread);
+        }
+        UpdateEstimate();
+    }
+
+    /// <summary>Particles first..first+count anywhere in sight of at, from to reach metres away (walkable and with
+    /// nothing in between), headings evenly within headingSpread of yaw.</summary>
+    public void SeedNear(int first, int count, Vector2 at, float yaw, float from, float reach, float headingSpread)
+    {
+        for (int i = first; i < first + count && i < m_Count; i++)
+        {
+            Vector2 p = at;
+            for (int t = 0; t < SeedTries; t++)
+            {
+                float r = from + (float)m_Random.NextDouble() * (reach - from);
+                Vector2 c = at + HeadingVector((float)m_Random.NextDouble() * 360f) * r;
+                if (m_Walkable == null || (m_Walkable.IsWalkable(c) && m_Walkable.SegmentClear(at, c)))
+                {
+                    p = c;
+                    break;
+                }
+            }
+            Seed(i, p, 0f, 0f, 0f, 1f, StartScaleSpread);
+            m_Heading[i] = Bound(yaw - BaseYaw + ((float)m_Random.NextDouble() * 2f - 1f) * headingSpread);
+        }
+        UpdateEstimate();
+    }
+
     /// <summary>Particles to use from the next Reset (a snap starts with a few hundred; KLD-sampling takes it on).</summary>
     public void SetCount(int count) => m_Count = Mathf.Clamp(count, 1, m_Capacity);
 
@@ -398,11 +443,21 @@ public sealed class PositionFilter
     // A step counted while ARCore can't track (the phone lowered or covered): map-constrained pedestrian dead
     // reckoning (Woodman & Harle, UbiComp 2008). Every particle moves planStep (plan metres), give or take
     // lengthSigma of its length and headingSigma degrees of its direction, and walls kill as usual.
-    public void StepBlind(Vector2 planStep, float lengthSigma, float headingSigma)
+    public void StepBlind(Vector2 planStep, float lengthSigma, float headingSigma) =>
+        StepBlind(planStep, float.NaN, planStep.magnitude, lengthSigma, headingSigma);
+
+    /// <summary>A step taken blind, its direction known in ARCore's world (degrees clockwise from world +z): each
+    /// particle turns it onto the plan by its own heading, so a cloud of several headings walks each its own way.</summary>
+    public void StepBlindWorld(float worldHeading, float length, float lengthSigma, float headingSigma) =>
+        StepBlind(Vector2.zero, worldHeading, length, lengthSigma, headingSigma);
+
+    void StepBlind(Vector2 planStep, float worldHeading, float length, float lengthSigma, float headingSigma)
     {
-        float length = planStep.magnitude;
         if (length <= 0f)
             return;
+        bool world = !float.IsNaN(worldHeading);
+        if (world)
+            planStep = HeadingVector(worldHeading - Yaw) * length;
         m_Blind = true;
         m_Walked += length;
         Vector2 direction = planStep / length;
@@ -412,6 +467,10 @@ public sealed class PositionFilter
             if (m_Weight[i] <= 0f)
                 continue;
             float turn = Gaussian() * headingSigma * Mathf.Deg2Rad;
+            if (world)
+            {
+                direction = HeadingVector(worldHeading - (BaseYaw + m_Heading[i]));
+            }
             float c = Mathf.Cos(turn), s = Mathf.Sin(turn);
             var turned = new Vector2(direction.x * c + direction.y * s, -direction.x * s + direction.y * c);
             Vector2 from = m_Position[i];
@@ -642,6 +701,7 @@ public sealed class PositionFilter
     public bool AddSignObservation(float worldBearing, float range, float rangeSigma,
         IReadOnlyList<Vector2> landmarks, IReadOnlyList<Vector2> normals)
     {
+        SignSeeded = false;
         if (landmarks == null || landmarks.Count == 0 || !(range > 0f))
             return false;
         rangeSigma = Mathf.Max(rangeSigma, MinRangeSigma);
@@ -656,6 +716,7 @@ public sealed class PositionFilter
             if (trusted)
                 return false;
             SeedRing(worldBearing, range, rangeSigma, landmarks, normals);
+            SignSeeded = true;
             PrepareStandOffs(landmarks, normals);
             total = WeighSign(worldBearing, range, rangeSigma, landmarks, normals);
             if (total <= 1e-12f)
@@ -914,6 +975,7 @@ public sealed class PositionFilter
         m_Count = n;
 
         float inject = InjectionShare;
+        float roughHeading = Mathf.Clamp(HeadingSpread * RoughenShare, MinUpdateRoughen, RoughenHeading);
         for (int i = 0; i < m_Count; i++)
         {
             if (inject > 0f && m_Random.NextDouble() < inject)
@@ -924,7 +986,7 @@ public sealed class PositionFilter
             Vector2 to = m_Position[i] + Gaussian2() * RoughenPosition;
             if (m_Walkable == null || m_Walkable.IsWalkable(to))
                 m_Position[i] = to;
-            m_Heading[i] = Bound(m_Heading[i] + Gaussian() * RoughenHeading);
+            m_Heading[i] = Bound(m_Heading[i] + Gaussian() * roughHeading);
             m_Scale[i] = Mathf.Clamp(m_Scale[i] + Gaussian() * RoughenScale, MinScale, MaxScale);
         }
         Uniform();
@@ -976,20 +1038,23 @@ public sealed class PositionFilter
         if (total <= 0f)
             return;
         mean /= total;
-        HeadingOffset = Mathf.Atan2(sin, cos) * Mathf.Rad2Deg;
+        // The estimate is the heaviest mode's mean, not the whole cloud's: a cloud split between two doors (a snap's
+        // alternatives, a sign's rings) has its mean between them, where the user surely isn't.
+        Vector2 mode = Mode(mean, out float modeSin, out float modeCos);
+        HeadingOffset = Mathf.Atan2(modeSin, modeCos) * Mathf.Rad2Deg;
         // Circular standard deviation from the mean resultant length R: sqrt(-2 ln R).
         float resultant = Mathf.Clamp(Mathf.Sqrt(sin * sin + cos * cos) / total, 1e-6f, 1f);
         HeadingSpread = Mathf.Sqrt(-2f * Mathf.Log(resultant)) * Mathf.Rad2Deg;
         Scale = scale / total;
 
         // The mean of a cloud split by a wall can sit in the wall: then the particle nearest it stands in.
-        Vector2 estimate = mean;
-        if (m_Walkable != null && !m_Walkable.IsWalkable(mean))
+        Vector2 estimate = mode;
+        if (m_Walkable != null && !m_Walkable.IsWalkable(mode))
         {
             float best = float.PositiveInfinity;
             for (int i = 0; i < m_Count; i++)
             {
-                float d = (m_Position[i] - mean).sqrMagnitude;
+                float d = (m_Position[i] - mode).sqrMagnitude;
                 if (m_Weight[i] > 0f && d < best)
                 {
                     best = d;
@@ -1012,6 +1077,63 @@ public sealed class PositionFilter
         Spread = Mathf.Sqrt(spread / total);
         Confidence = near / total;
     }
+
+    // The heaviest mode: the ModeCell grid's heaviest 3 x 3 block, then mean shift (a flat ModeReach window) from its
+    // weighted mean. Its weighted heading sums come back for the heading estimate.
+    Vector2 Mode(Vector2 mean, out float sin, out float cos)
+    {
+        m_ModeCells.Clear();
+        for (int i = 0; i < m_Count; i++)
+        {
+            if (m_Weight[i] <= 0f)
+                continue;
+            long key = CellKey(m_Position[i]);
+            m_ModeCells.TryGetValue(key, out float w);
+            m_ModeCells[key] = w + m_Weight[i];
+        }
+        long bestKey = CellKey(mean);
+        float bestWeight = -1f;
+        foreach (var cell in m_ModeCells)
+        {
+            int cx = (int)(cell.Key >> 32), cy = (int)(cell.Key & 0xffffffffL);
+            float w = 0f;
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                    if (m_ModeCells.TryGetValue(CellKey(cx + dx, cy + dy), out float c))
+                        w += c;
+            if (w > bestWeight)
+            {
+                bestWeight = w;
+                bestKey = cell.Key;
+            }
+        }
+        var centre = new Vector2(((int)(bestKey >> 32) + 0.5f) * ModeCell, ((int)(bestKey & 0xffffffffL) + 0.5f) * ModeCell);
+        sin = cos = 0f;
+        for (int pass = 0; pass < ModeShifts; pass++)
+        {
+            Vector2 sum = Vector2.zero;
+            float total = 0f;
+            sin = cos = 0f;
+            for (int i = 0; i < m_Count; i++)
+            {
+                float w = m_Weight[i];
+                if (w <= 0f || (m_Position[i] - centre).sqrMagnitude > ModeReach * ModeReach)
+                    continue;
+                sum += m_Position[i] * w;
+                total += w;
+                float r = m_Heading[i] * Mathf.Deg2Rad;
+                sin += Mathf.Sin(r) * w;
+                cos += Mathf.Cos(r) * w;
+            }
+            if (total <= 0f)
+                break;
+            centre = sum / total;
+        }
+        return centre;
+    }
+
+    static long CellKey(Vector2 p) => CellKey(Mathf.FloorToInt(p.x / ModeCell), Mathf.FloorToInt(p.y / ModeCell));
+    static long CellKey(int x, int y) => ((long)x << 32) | (uint)y;
 
     float Gaussian()
     {
