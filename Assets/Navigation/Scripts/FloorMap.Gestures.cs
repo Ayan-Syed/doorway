@@ -41,6 +41,15 @@ public partial class FloorMap
         m_Pointers.Remove(e.pointerId);
     }
 
+    // A finger that was down when the map was hidden never sends its up: forget them all, or the next one-finger
+    // drag would be taken for a pinch and never fling.
+    void OnDisable()
+    {
+        m_Pointers.Clear();
+        m_Velocity = Vector2.zero;
+        m_Pinched = false;
+    }
+
     public void OnBeginDrag(PointerEventData e)
     {
         m_Velocity = Vector2.zero;

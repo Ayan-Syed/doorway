@@ -1,11 +1,14 @@
 """Splits BA1 floor 1 into rooms, hallways and outside, for the filled indoor map.
 
 Seeded watershed on the distance from the walls of the labeled plan: each printed room number seeds
-its room, the walkway graph's hallway points seed the hallways, the image border seeds the outside.
+its room, the hand-made walkway graph's links seed the hallways all along their length (so a side
+passage, like the one to 148's door, doesn't flood as the room beside it), the image border seeds the
+outside.
 Door openings are narrow, so the floods from either side meet in them. Closed-off spaces with no
 number (closets, shafts) get a seed of their own.
 Run from anywhere: python segment.py -> regions.npz, check/segment_check.png
 """
+import math
 import os
 
 import numpy as np
@@ -53,7 +56,17 @@ def segment():
     h, w = dark.shape
 
     names = {OUTSIDE: ("outside", "outside"), WALKWAY: ("walkway", "walkway")}
-    seeds = [(x, y, WALKWAY) for x, y in graph.N.values()]
+    # Along every hand-made link, not just at its points, so a narrow side passage (148's, off the diagonal hall)
+    # floods as hallway rather than as the room beside it. Links out through the entrances are left out.
+    nodes, edges = graph.build(auto=False)
+    exits = {n for _, _, _, kind, ds in graph.P if kind == "exit" for n, _, _ in ds}
+    seeds = []
+    for a, b in edges:
+        if a in exits or b in exits:
+            continue
+        (ax, ay), (bx, by) = nodes[a], nodes[b]
+        n = max(int(math.hypot(bx - ax, by - ay) / 6), 1)
+        seeds += [(ax + (bx - ax) * k / n, ay + (by - ay) * k / n, WALKWAY) for k in range(n + 1)]
     nid = 3
     for lab in labels:
         kind = kind_of(lab["text"])

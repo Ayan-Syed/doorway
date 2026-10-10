@@ -1,9 +1,100 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.UI;
 
 // The state machine: Show is the one place the step changes, and Update runs the step on screen.
 public partial class NavigationScreen
 {
+    // A part of the screen (the map, a panel, a sheet) shown and hidden by switching its canvases on and off, not
+    // its GameObject. A hidden canvas keeps its meshes, so showing the part again only re-batches it, where
+    // SetActive(true) re-meshes every graphic in it: the map's campus ground alone is 45k vertices, the directory
+    // dozens of rows. While it's hidden its CanvasGroup takes no taps and the scripts that run it (the map, a sheet)
+    // are off. Canvases inside a part that is a layer of its own (a sheet in a panel) are left to that part.
+    sealed class Layer
+    {
+        readonly GameObject m_Root;
+        readonly CanvasGroup m_Group;
+        readonly Behaviour[] m_Scripts;
+        Canvas[] m_Canvases = new Canvas[0];
+        GraphicRaycaster[] m_Raycasters = new GraphicRaycaster[0];
+
+        public bool Shown { get; private set; }
+
+        public Layer(Component root, Behaviour[] scripts)
+        {
+            m_Root = root.gameObject;
+            m_Scripts = scripts;
+            if (!m_Root.TryGetComponent(out m_Group))
+                m_Group = m_Root.AddComponent<CanvasGroup>();
+            Shown = m_Root.activeSelf;
+        }
+
+        // Once every layer is known: takes the canvases and raycasters under it that no nested layer has, and
+        // switches the GameObject on for good, hidden or shown as it was.
+        public void Claim(Dictionary<GameObject, Layer> layers)
+        {
+            m_Canvases = Own<Canvas>(layers);
+            m_Raycasters = Own<GraphicRaycaster>(layers);
+            bool shown = Shown;
+            if (!m_Root.activeSelf)
+                m_Root.SetActive(true);
+            Set(shown, true);
+        }
+
+        T[] Own<T>(Dictionary<GameObject, Layer> layers) where T : Component
+        {
+            var own = new List<T>();
+            foreach (T item in m_Root.GetComponentsInChildren<T>(true))
+            {
+                Transform t = item.transform;
+                while (t != m_Root.transform && !layers.ContainsKey(t.gameObject))
+                    t = t.parent;
+                if (t == m_Root.transform)
+                    own.Add(item);
+            }
+            return own.ToArray();
+        }
+
+        public void Set(bool shown, bool force = false)
+        {
+            if (shown == Shown && !force)
+                return;
+            Shown = shown;
+            foreach (Canvas canvas in m_Canvases)
+                canvas.enabled = shown;
+            foreach (GraphicRaycaster raycaster in m_Raycasters)
+                raycaster.enabled = shown;
+            m_Group.blocksRaycasts = shown;
+            m_Group.interactable = shown;
+            foreach (Behaviour script in m_Scripts)
+                if (script != null)
+                    script.enabled = shown;
+        }
+    }
+
+    // The map, the panels and the sheets are layers. scripts: what is switched off with it while it's hidden.
+    void AddLayer(Component root, params Behaviour[] scripts)
+    {
+        if (root != null)
+            m_Layers[root.gameObject] = new Layer(root, scripts);
+    }
+
+    // Shown and hidden by its canvases if it's a layer, else by SetActive.
+    void Display(Component part, bool shown)
+    {
+        if (m_Layers != null && m_Layers.TryGetValue(part.gameObject, out Layer layer))
+            layer.Set(shown);
+        else if (part.gameObject.activeSelf != shown)
+            part.gameObject.SetActive(shown);
+    }
+
+    bool IsShown(Component part)
+    {
+        return m_Layers != null && m_Layers.TryGetValue(part.gameObject, out Layer layer) ? layer.Shown
+            : part.gameObject.activeSelf;
+    }
+
     void Show(Step step)
     {
         m_Step = step;
@@ -12,8 +103,7 @@ public partial class NavigationScreen
         // The map is behind Home to Align, and behind the arrived card: AR is off by then, so there's no camera
         // feed to show through.
         bool onMap = step <= Step.Align || step == Step.Arrived;
-        if (map.gameObject.activeSelf != onMap)
-            map.gameObject.SetActive(onMap);
+        Display(map, onMap);
 
         SetPanel(homePanel, step <= Step.Place);
         SetPanel(routePanel, step == Step.Start || step == Step.Align);
@@ -38,39 +128,44 @@ public partial class NavigationScreen
 
         // AR runs from picking a start (so it's tracking by Start) to the end of the walk. Before that the map fills
         // the screen and the camera would only cost frames and battery behind it; on the arrived card it's done.
+        // The screen stays on over the same stretch (the phone is held up, untouched) and sleeps as usual on the map.
         if (Application.isPlaying)
-            navigator.SetARActive(step >= Step.Start && step <= Step.Guide);
+        {
+            bool ar = step >= Step.Start && step <= Step.Guide;
+            navigator.SetARActive(ar);
+            Screen.sleepTimeout = ar ? SleepTimeout.NeverSleep : SleepTimeout.SystemSetting;
+        }
         // With Depth, the AR camera's feed shows through behind the UI.
         if (uiCamera != null)
             uiCamera.clearFlags = onMap ? CameraClearFlags.SolidColor : CameraClearFlags.Depth;
         UpdateGpsPuck();
     }
 
-    // Panels fade in (Update raises the alpha); they switch off at once.
+    // Panels fade in (Update raises the alpha); they hide at once.
     void SetPanel(CanvasGroup panel, bool visible)
     {
-        if (panel.gameObject.activeSelf == visible)
+        if (IsShown(panel) == visible)
             return;
         if (visible)
             panel.alpha = Application.isPlaying ? 0f : 1f;   // the editor's previews show it whole
-        panel.gameObject.SetActive(visible);
+        Display(panel, visible);
     }
 
-    static void KeepSheet(BottomSheet sheet, bool own)
+    void KeepSheet(BottomSheet sheet, bool own)
     {
-        if (!own && sheet.gameObject.activeSelf)
-            sheet.gameObject.SetActive(false);
+        if (!own)
+            Display(sheet, false);
     }
 
     // A sheet already up moves to the stop; one that isn't slides up from the bottom edge.
-    static void OpenSheet(BottomSheet sheet, int stop)
+    void OpenSheet(BottomSheet sheet, int stop)
     {
-        if (sheet.gameObject.activeSelf)
+        if (IsShown(sheet))
         {
             sheet.MoveTo(stop, false);
             return;
         }
-        sheet.gameObject.SetActive(true);
+        Display(sheet, true);
         sheet.Present(stop);
     }
 
@@ -133,7 +228,7 @@ public partial class NavigationScreen
 
         float fade = Time.unscaledDeltaTime * FadeSpeed;
         foreach (CanvasGroup panel in m_Panels)
-            if (panel.gameObject.activeSelf && panel.alpha < 1f)
+            if (panel.alpha < 1f && IsShown(panel))
                 panel.alpha = Mathf.MoveTowards(panel.alpha, 1f, fade);
 
         if (settingsPanel.gameObject.activeSelf)
@@ -180,6 +275,8 @@ public partial class NavigationScreen
                     ClearRoomSearch();
                 else if (m_Kind != null)
                     SetKind(null, false);
+                else if (m_Building != null)
+                    ShowPlanBuilding();   // the other building's name and pin go: back to the floor's own
                 else if (homeSheet.Stop > 0)
                     homeSheet.MoveTo(0, false);
                 else if (Time.unscaledTime < m_ExitConfirmUntil)

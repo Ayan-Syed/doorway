@@ -22,6 +22,8 @@ public class Spinner : MaskableGraphic
     static readonly List<Vector2> s_Normals = new List<Vector2>();
 
     float m_Time;
+    Canvas m_OwnCanvas;
+    bool m_LookedForCanvas;
 
     // For the preview renders: a fixed moment of the spin.
     public void SetTime(float seconds)
@@ -32,6 +34,15 @@ public class Spinner : MaskableGraphic
 
     void Update()
     {
+        // Each spinner has a canvas of its own, switched off while the part of the screen holding it is hidden:
+        // then it would re-mesh every frame for nobody.
+        if (!m_LookedForCanvas)
+        {
+            m_LookedForCanvas = true;
+            TryGetComponent(out m_OwnCanvas);
+        }
+        if (m_OwnCanvas != null && !m_OwnCanvas.enabled)
+            return;
         m_Time += Time.unscaledDeltaTime;
         SetVerticesDirty();
     }

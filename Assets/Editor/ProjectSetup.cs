@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
 using UnityEditor.XR.ARCore;
 using UnityEditor.XR.Management;
 using UnityEditor.XR.Management.Metadata;
@@ -22,6 +24,8 @@ public static class ProjectSetup
 
     // ARCore with OpenGLES3 needs at least API 25 on Unity 6.3 (ARCoreProjectValidationRules).
     const AndroidSdkVersions MinAndroidApiLevel = AndroidSdkVersions.AndroidApiLevel25;
+    // Pinned, not "highest installed" (the default), so every laptop builds the same target.
+    const AndroidSdkVersions TargetAndroidApiLevel = (AndroidSdkVersions)36;
 
     // One package name for every laptop, so a build from anyone's machine installs over the last one
     // (as long as it's signed with the same key). The default was com.DefaultCompany.Doorway.
@@ -46,6 +50,7 @@ public static class ProjectSetup
         // Raised, never lowered.
         if (PlayerSettings.Android.minSdkVersion < MinAndroidApiLevel)
             PlayerSettings.Android.minSdkVersion = MinAndroidApiLevel;
+        PlayerSettings.Android.targetSdkVersion = TargetAndroidApiLevel;
 
         // ARCore needs OpenGLES3 or Vulkan. OpenGLES3 alone is the long-tested path and works from API 25;
         // ARCore on Vulkan needs API 29.
@@ -82,6 +87,37 @@ public static class ProjectSetup
             Debug.LogException(e);
             EditorApplication.Exit(1);
         }
+    }
+
+    // What would make an Android build ship without AR or under another name; empty when the settings are right.
+    public static List<string> Problems()
+    {
+        var problems = new List<string>();
+        if (PlayerSettings.GetApplicationIdentifier(NamedBuildTarget.Android) != ApplicationId)
+            problems.Add($"the package name isn't {ApplicationId}");
+        if (PlayerSettings.GetScriptingBackend(NamedBuildTarget.Android) != ScriptingImplementation.IL2CPP)
+            problems.Add("the scripting backend isn't IL2CPP");
+        if ((PlayerSettings.Android.targetArchitectures & AndroidArchitecture.ARM64) == 0)
+            problems.Add("ARM64 isn't a target architecture");
+        if (!ARCoreLoaderAssigned())
+            problems.Add("ARCore isn't the Android XR plug-in");
+        return problems;
+    }
+
+    static bool ARCoreLoaderAssigned()
+    {
+        if (!EditorBuildSettings.TryGetConfigObject(XRGeneralSettings.k_SettingsKey, out XRGeneralSettingsPerBuildTarget perTarget)
+            || perTarget == null)
+            return false;
+        XRGeneralSettings android = perTarget.SettingsForBuildTarget(BuildTargetGroup.Android);
+        if (android == null || android.AssignedSettings == null)
+            return false;
+        foreach (XRLoader loader in android.AssignedSettings.activeLoaders)
+        {
+            if (loader != null && loader.GetType().FullName == ARCoreLoaderType)
+                return true;
+        }
+        return false;
     }
 
     // AR Foundation: ARCore must be the XR provider for Android, started with the app.
@@ -139,5 +175,22 @@ public static class ProjectSetup
         }
         EditorBuildSettings.AddConfigObject(XRGeneralSettings.k_SettingsKey, perTarget, true);
         return perTarget;
+    }
+}
+
+// Stops any Android build, a manual File > Build included, whose settings would ship an app without AR or under
+// another package name. BuildApk applies the settings itself; elsewhere, use Doorway > Apply Project Settings.
+class ProjectSetupBuildCheck : IPreprocessBuildWithReport
+{
+    public int callbackOrder => 0;
+
+    public void OnPreprocessBuild(BuildReport report)
+    {
+        if (report.summary.platform != BuildTarget.Android)
+            return;
+        List<string> problems = ProjectSetup.Problems();
+        if (problems.Count > 0)
+            throw new BuildFailedException("[Navigation] Not building: " + string.Join("; ", problems) +
+                                           ". Run Doorway > Apply Project Settings.");
     }
 }

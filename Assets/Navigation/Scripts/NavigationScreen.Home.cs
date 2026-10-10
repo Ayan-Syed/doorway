@@ -263,14 +263,18 @@ public partial class NavigationScreen
         : m_Indoors ? $"{Plan.floor} · Tap any room to go there"
         : "Indoor map available · Tap Go inside";
 
-    // The directory sheet is about the plan's building: its name, and its places in the list.
+    // The directory sheet is about the plan's building: its name, and its places in the list. Another building's
+    // pin goes with its name (callers that pin a place pin it after this).
     void ShowPlanBuilding()
     {
         bool other = m_Building != null;
         m_Building = null;
         homeTitle.text = Plan.building;
         ShowDirectory(true);
-        if (other && m_Kind == null)
+        if (!other)
+            return;
+        map.HidePin();
+        if (m_Kind == null)
             homeSubtitle.text = HomeSubtitle;
     }
 
@@ -360,13 +364,25 @@ public partial class NavigationScreen
             Haptics.Tick(15);
     }
 
-    // Only floor 1 is mapped.
+    // Only the plan's floor is mapped.
     void PickFloor(int floor)
     {
         SetFloorMenu(false);
-        if (floor == 1)
+        if (floor == FloorNumber(Plan.floor))
             FrameAll(false);
         else
             Snack($"Floor {floor} isn't mapped yet");
+    }
+
+    // "Floor 2" is 2: the plan's floor as the floor menu numbers its rows (1 if it says no number). The scene
+    // builder ticks that row.
+    public static int FloorNumber(string floor)
+    {
+        int number = 0;
+        if (floor != null)
+            foreach (char c in floor)
+                if (c >= '0' && c <= '9')
+                    number = number * 10 + (c - '0');
+        return number > 0 ? number : 1;
     }
 }

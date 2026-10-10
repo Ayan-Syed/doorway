@@ -94,6 +94,14 @@ public class BottomSheet : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndD
         SetHeight(Mathf.Abs(next - m_Target) < 0.5f ? m_Target : next);
     }
 
+    // Hidden mid-drag, it never hears the drag end: without this it would think it's still held, and never slide
+    // to a stop again (Present would leave it at the bottom edge).
+    void OnDisable()
+    {
+        IsDragging = false;
+        m_Velocity = 0f;
+    }
+
     public void OnBeginDrag(PointerEventData e)
     {
         if (!draggable)

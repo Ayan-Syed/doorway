@@ -12,6 +12,9 @@ public static partial class BuildNavigateScene
 {
     static NavigationScreen CreateScreen(Navigator navigator)
     {
+        if (!CheckCampusSize())
+            return null;
+
         // The input module assigns the Input System's default UI actions (touch included) itself when it has none.
         new GameObject("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
 
@@ -50,6 +53,19 @@ public static partial class BuildNavigateScene
         return recorded ? screen : null;
     }
 
+    // The campus ground is one uGUI mesh, which can't reach 65,000 vertices: a bigger campus export stops the build
+    // here instead of leaving the phone's map without its ground.
+    static bool CheckCampusSize()
+    {
+        CampusData campus = CampusData.Load(s_CampusGeometry, s_CampusInfo);
+        int vertices = CampusGround.VertexCount(campus);
+        if (vertices <= CampusGround.MaxVertices)
+            return true;
+        Debug.LogError($"[Navigation] {CampusGeometryPath} has {vertices} ground vertices; one map mesh holds at most " +
+                       $"{CampusGround.MaxVertices}. Simplify it more in Tools/campus/campus.py; not building.");
+        return false;
+    }
+
     static NavigationScreen CreateCanvas(Navigator navigator, Camera uiCamera)
     {
         var root = new GameObject("Navigation Screen", typeof(RectTransform));
@@ -68,12 +84,16 @@ public static partial class BuildNavigateScene
         screen.navigator = navigator;
 
         // The map runs under the status bar and gesture bar; everything else keeps to the safe area. A canvas of
-        // its own, so the map moving doesn't rebuild the panels over it. Its ground Image keeps raycasts on: it is
-        // what catches the map's drags and taps (FloorMap, on the same object, handles them).
+        // its own, so the map moving doesn't rebuild the panels over it, and a CanvasGroup NavigationScreen stops its
+        // taps with while it's hidden. Its Image catches the map's drags and taps (FloorMap, on the same object,
+        // handles them) but draws nothing: the UI camera already clears to the map's ground, so a coloured Image
+        // would only paint the whole screen a second time every frame.
         RectTransform window = Stretch("Map", rootRect);
-        window.gameObject.AddComponent<Canvas>();
-        window.gameObject.AddComponent<GraphicRaycaster>();
-        window.gameObject.AddComponent<Image>().color = s_T.mapGround;
+        OwnCanvas(window);
+        window.gameObject.AddComponent<CanvasGroup>();
+        var hitArea = window.gameObject.AddComponent<Image>();
+        hitArea.color = Color.clear;
+        hitArea.canvasRenderer.cullTransparentMesh = true;
         screen.map = CreateFloorMap(window, 1f, true);
         // Out far enough for the whole campus. FloorMap's own default (0.6) is the minimap's: it would stop the
         // zoom long before the 900 m campus view (zoom 0.12) or the launch view (about 0.055), so without this you

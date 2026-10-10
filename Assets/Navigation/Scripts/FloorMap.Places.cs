@@ -1,10 +1,13 @@
 using System;
 using UnityEngine;
 
-// The place map (Data/*-places.bytes: uint16 width and height, then a byte per cell, top row first, each the
-// index + 1 of the place there or 0), and the selected place's highlight drawn from it.
+// The place map (Data/*-places.bytes, little-endian: "DWPL", uint16 version 1, uint16 width and height, uint32
+// FloorPlan.PlaceIdHash of the places it was made for, then a byte per cell, top row first, each the index + 1 of
+// the place there or 0), and the selected place's highlight drawn from it.
 public partial class FloorMap
 {
+    const string PlaceMapMagic = "DWPL";
+    const int PlaceMapVersion = 1;
     int m_MapWidth, m_MapHeight;
     byte[] m_Places;
     Vector2Int[] m_PixelMin, m_PixelMax;   // each place's cells on the place map; max (-1, -1) for none
@@ -21,11 +24,29 @@ public partial class FloorMap
         m_Places = null;
         if (placeMap == null)
             return;
-        byte[] b = placeMap.bytes;
-        m_MapWidth = b[0] | b[1] << 8;
-        m_MapHeight = b[2] | b[3] << 8;
-        m_Places = new byte[m_MapWidth * m_MapHeight];
-        Buffer.BlockCopy(b, 4, m_Places, 0, m_Places.Length);
+        m_Places = ReadPlaceGrid(placeMap.bytes, placeMap.name, m_Plan, out m_MapWidth, out m_MapHeight);
+    }
+
+    // The cells of a place map made for this plan's places (FormatException, naming the file and the problem,
+    // for a short, foreign or stale one: a grid for another place list would light up the wrong rooms).
+    public static byte[] ReadPlaceGrid(byte[] bytes, string name, FloorPlan plan, out int width, out int height)
+    {
+        var reader = new DataReader(bytes, name);
+        reader.Header(PlaceMapMagic, PlaceMapVersion);
+        width = reader.UInt16();
+        height = reader.UInt16();
+        uint hash = reader.UInt32();
+        if (plan != null && hash != plan.PlaceIdHash())
+            throw reader.Fail("made for a different list of places than the floor plan's; run Tools/ba1-floor1/make_data.py");
+        byte[] cells = reader.Bytes(width * height);
+        reader.End();
+        int count = plan?.places.Count ?? 255;
+        foreach (byte v in cells)
+        {
+            if (v > count)
+                throw reader.Fail($"a cell names place {v}, but the plan has {count}");
+        }
+        return cells;
     }
 
     // The place at a plan point: null in hallways, outside, and in rooms nobody navigates to.

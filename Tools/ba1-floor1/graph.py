@@ -2,10 +2,11 @@
 
 Run from anywhere: python graph.py [--export] [--hand]
   -> check/graph_overlay.png (check), wall-crossing report,
-     and with --export the Unity JSON, the minimap and the pin textures.
+     and with --export the Unity JSON (door directions measured on the drawing, room-number signs),
+     the minimap and the pin textures.
 --hand checks the hand-made graph alone (no rooms.json needed).
-After --export always run basemap.py: it adds the label areas and rebuilds the place grid
-for the new place order (make_data.py runs everything in order).
+After --export always run basemap.py, walls.py and walkable.py: basemap adds the label areas and rebuilds the
+place grid for the new place order (make_data.py runs everything in order).
 """
 import json
 import math
@@ -14,6 +15,8 @@ import sys
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+
+import doors
 
 # Paths, all relative to this script so the folder works on any machine.
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +38,21 @@ MINIMAP_WIDTH = 2048          # width of ba1-floor1-plan.png, and the basis of i
 # Where the plan sits on Earth, fitted to UCF's campus map outline of BA1 (docs/geo/ucf-locations.json id 45):
 # east/north metres from (lat, lon), turned by angle (degrees anticlockwise) and moved by (x, z), are plan metres.
 GEO = {"lat": 28.6010684, "lon": -81.1991664, "angle": 315.371, "x": -2.272, "z": 7.066}
+
+
+# The .bytes files start with a 4-letter magic and a uint16 version, so the app can tell a stale or foreign
+# file from a broken one (CampusData, WallMesh, FloorMap.ReadPlaceGrid and Walkable check them).
+PLACES_MAGIC, WALLS_MAGIC, CAMPUS_MAGIC, WALKABLE_MAGIC = b"DWPL", b"DWWL", b"DWCP", b"DWWK"
+FORMAT_VERSION = 1
+
+
+def place_id_hash(ids):
+    """FNV-1a (32-bit) of the place ids, one per line. places.bytes carries it, so the app can tell a place grid
+    made for a different place list or order (FloorPlan.PlaceIdHash computes the same)."""
+    h = 0x811C9DC5
+    for b in "\n".join(ids).encode("utf-8"):
+        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
+    return h
 
 
 def need(path, how):
@@ -66,6 +84,9 @@ N = {
     "e0": (2285, 1288), "e1": (2373, 1295), "e2": (2550, 1288), "e3": (2690, 1288),
     # South stubs to 107's doors.
     "s1": (1735, 1460), "s2": (1735, 1600), "u1": (2240, 1460), "u2": (2240, 1600),
+    # Corridor 197, behind the diagonal hall: in through the doorway by 146 (g197), down its middle.
+    "g197": (904, 1663), "c197a": (1150, 1560), "c197b": (1060, 1640), "c197c": (970, 1725),
+    "c197d": (870, 1805), "c197e": (790, 1890), "c197f": (750, 1990),
 }
 
 # Hallway edges, undirected.
@@ -80,6 +101,8 @@ E = [
     ("b1", "b2"), ("b2", "b3"),
     ("t_e0", "e0"), ("e0", "e1"), ("e1", "e2"), ("e2", "e3"),
     ("t_sw", "s1"), ("s1", "s2"), ("t_se", "u1"), ("u1", "u2"),
+    ("d2", "g197"), ("d3", "g197"), ("g197", "c197c"),
+    ("c197a", "c197b"), ("c197b", "c197c"), ("c197c", "c197d"), ("c197d", "c197e"), ("c197e", "c197f"),
 ]
 
 
@@ -127,14 +150,15 @@ P = [
 ]
 
 # Which hallway points each door point joins. Two links let a route enter the door spot from
-# either side along the hall, so it doesn't double back to a single node.
+# either side along the hall, so it doesn't double back to a single node; a door spot that sits on a
+# hallway point (p110 on e1, p113 on e2) joins that point too, or a route overshoots and turns back.
 LINKS = {
     "p107w": ["s2"], "p107e": ["u2"], "p119w": ["a2", "a3"], "p119e": ["b1", "t_ne"],
-    "p121n": ["a1", "a2"], "p121s": ["a2"], "p122": ["a3"], "p126": ["c2", "c3"],
-    "p110": ["e0", "e2"], "p113": ["e1", "e3"], "p115": ["t_e1", "t_se"], "p116": ["t_e1", "t_ne"],
-    "p117": ["b2", "b3"], "p130": ["l1"], "p145": ["l4", "l3"], "p146": ["d2"],
+    "p121n": ["a1", "a2"], "p121s": ["a2", "a1"], "p122": ["a3"], "p126": ["c2", "c3"],
+    "p110": ["e0", "e2", "e1"], "p113": ["e1", "e3", "e2"], "p115": ["t_e1", "t_e0"], "p116": ["t_e1", "t_ne"],
+    "p117": ["b2", "b3"], "p130": ["l1"], "p145": ["l4", "l3"], "p146": ["d2", "d3"],
     "p147": ["d3", "d4"], "p148": ["d4"], "pma": ["t_w1"], "pwa": ["t_w2"],
-    "pmw": ["l1", "l2"], "pww": ["l2", "l3"], "pea": ["t_s"], "pew": ["l3"],
+    "pmw": ["l1", "l2"], "pww": ["l2", "l3"], "pea": ["t_s", "t_sw"], "pew": ["l3"],
     "ps127": ["t_s"], "ps129": ["l2"], "ps120": ["a1"], "ps118": ["b3"],
     "xn": ["w_189"], "xnw": ["a1"], "xne": ["b3"], "xsw": ["s2"],
     "xse": ["u2"], "xe": ["e3"], "xba2": ["l4", "l5"],
@@ -145,7 +169,7 @@ LINKS = {
 DOOR_LABELS = {
     "p107w": "West door", "p107e": "East door", "p119w": "West door", "p119e": "East door",
     "p121n": "North door", "p121s": "South door",
-    "r109_0": "East door", "r109_1": "West door", "r139_0": "South door", "r139_1": "North door",
+    "r139_0": "South door", "r139_1": "North door",
     "r149_1": "West door", "r149_2": "East door",
 }
 
@@ -304,14 +328,38 @@ def load_labels():
         return json.load(f)
 
 
+def fitted_places(nodes):
+    """places(), each door's direction measured on the drawing (doors.fit_direction), and the room-number signs.
+    Prints the doors with no on-grid wall in front to measure (those keep their drawn direction)."""
+    with np.load(need(REGIONS, "run segment.py first (or make_data.py)")) as d:
+        R, dark = d["regions"], d["dark"]
+        names = {int(i): (str(t), str(k)) for i, t, k in zip(d["ids"], d["texts"], d["kinds"])}
+    ink = doors.Ink(dark)
+    out, fitted = [], {}
+    for pid, name, detail, kind, ds in places():
+        new = []
+        for n, xy, (dx, dy) in ds:
+            if n not in fitted:
+                fitted[n] = doors.fit_direction(R, ink, nodes[n][0], nodes[n][1], dx, dy)
+                if fitted[n][2] is not None and not fitted[n][3]:
+                    print(f"  door {n} of {pid}: what's in front is at {fitted[n][2]:.1f} deg, off the 45-degree "
+                          f"grid; kept as drawn")
+                elif fitted[n][2] is None:
+                    print(f"  door {n} of {pid}: no wall in front to measure, kept as drawn")
+            new.append((n, xy, fitted[n][0]))
+        out.append((pid, name, detail, kind, new))
+    return out, doors.signs_for(out, nodes, R, names, ink)
+
+
 def export(nodes, edges):
     """Writes ba1-floor1.json (what Unity loads) and the minimap. basemap.py then replaces the labels."""
     os.makedirs(DATA_DIR, exist_ok=True)
+    measured, signs = fitted_places(nodes)
     out_places = []
-    for pid, name, detail, kind, doors in places():
+    for pid, name, detail, kind, ds in measured:
         out_places.append({"id": pid, "name": name, "detail": detail, "kind": kind, "doors": [
             {"node": n, "label": DOOR_LABELS.get(n, ""), "dx": round(dx, 4), "dz": round(-dy, 4)}
-            for n, _, (dx, dy) in doors]})
+            for n, _, (dx, dy) in ds]})
     labels = load_labels()
     # First-pass labels: whole room numbers at the printed spot. basemap.py swaps in labels with areas.
     first = []
@@ -330,6 +378,7 @@ def export(nodes, edges):
         "edges": [{"a": a, "b": b} for a, b in edges],
         "places": out_places,
         "labels": first,
+        "signs": signs,
         "image": {"left": left, "top": top, "metersPerPixel": round(w / PX_PER_M / MINIMAP_WIDTH, 6),
                   "width": MINIMAP_WIDTH, "height": height},
         "geo": GEO,
@@ -338,7 +387,7 @@ def export(nodes, edges):
         json.dump(plan, f, ensure_ascii=False, indent=1)
     minimap(labels, (MINIMAP_WIDTH, height))
     print("exported", len(plan["nodes"]), "nodes", len(plan["edges"]), "edges",
-          len(out_places), "places", len(first), "labels")
+          len(out_places), "places", len(first), "labels", len(signs), "signs")
 
 
 def minimap(all_labels, size):
@@ -418,6 +467,9 @@ def main():
             sys.exit(f"The graph is in {len(groups)} pieces: fix it before exporting")
         export(nodes, edges)
         textures()
+        if "--pipeline" not in sys.argv:
+            print("\nWARNING: ba1-floor1.json now has labels without areas and a place order the place grid may not"
+                  "\nmatch. Run basemap.py, walls.py and walkable.py next (or make_data.py, which runs everything).")
 
 
 if __name__ == "__main__":

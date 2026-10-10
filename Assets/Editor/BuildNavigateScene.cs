@@ -87,24 +87,31 @@ public static partial class BuildNavigateScene
                 $"Built {ScenePath} and set it as the only scene in Build Settings.", "OK");
     }
 
-    // Unity.exe -batchmode -projectPath <project> -buildTarget Android -executeMethod BuildNavigateScene.BuildApk [-theme paper]
-    // (No -quit needed: this exits by itself, 0 on success and 1 on any failure.)
+    // Unity.exe -batchmode -projectPath <project> -buildTarget Android -executeMethod BuildNavigateScene.BuildApk
+    //     [-theme paper] [-versionCode N]
+    // (No -quit needed: this exits by itself, 0 on success and 1 on any failure.) Signing: see ReleaseSettings.
     public static void BuildApk()
     {
         try
         {
+            // A fresh clone has Unity's defaults (no ARCore, com.DefaultCompany, Mono): set ours first.
+            ProjectSetup.Apply();
             if (!ValidatePlan() || !CreateScene(ThemeArgument(), out _))
             {
                 EditorApplication.Exit(1);
                 return;
             }
-            BuildReport report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
+            BuildReport report;
+            using (new ReleaseSettings())
             {
-                scenes = new[] { ScenePath },
-                locationPathName = ApkPath,
-                target = BuildTarget.Android,
-                options = BuildOptions.None,
-            });
+                report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
+                {
+                    scenes = new[] { ScenePath },
+                    locationPathName = ApkPath,
+                    target = BuildTarget.Android,
+                    options = BuildOptions.None,
+                });
+            }
             Debug.Log($"[Navigation] Build {report.summary.result}: {ApkPath}, {report.summary.totalErrors} errors.");
             EditorApplication.Exit(report.summary.result == BuildResult.Succeeded ? 0 : 1);
         }
@@ -127,8 +134,9 @@ public static partial class BuildNavigateScene
         return DefaultTheme;
     }
 
-    // Bad plan data (an edge, door or place naming a node that isn't there) would otherwise only throw on the
-    // phone, deep inside FloorPlan or the Router. Checked before anything is built.
+    // Bad data (a node that isn't there, a place grid for other places, a truncated walls or campus file...) would
+    // otherwise only fail on the phone. Every data file is checked (BuildNavigateScene.Validate) before anything
+    // is built.
     static bool ValidatePlan()
     {
         var json = AssetDatabase.LoadAssetAtPath<TextAsset>(PlanJsonPath);
@@ -142,10 +150,11 @@ public static partial class BuildNavigateScene
 
     static bool ValidatePlan(TextAsset json)
     {
-        if (FloorPlan.Validate(json.text, out string error))
+        string problem = DataProblem(json);
+        if (problem == null)
             return true;
-        Debug.LogError($"[Navigation] Bad floor plan data in {PlanJsonPath}: {error} Fix the data " +
-                       "(Tools/ba1-floor1) and export again; not building.");
+        Debug.LogError($"[Navigation] Bad app data: {problem} Fix the data (python Tools/ba1-floor1/make_data.py " +
+                       "--campus) and build again; not building.");
         return false;
     }
 
@@ -220,6 +229,7 @@ public static partial class BuildNavigateScene
         planes.requestedDetectionMode = PlaneDetectionMode.Horizontal;
 
         Navigator navigator = CreateNavigator(planJson, arCamera.transform, planes);
+        navigator.signReader = CreateSignReader(arCamera);
         navigator.session = session;
 
         screen = CreateScreen(navigator);

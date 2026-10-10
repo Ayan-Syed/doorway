@@ -5,6 +5,11 @@ using UnityEngine;
 // The campus around the building, from OpenStreetMap (Tools/campus/campus.py): ground triangles in layers, and every
 // building's outline, roof, height and name. Plan metres, like the floor plan. Read once and shared, so the big map
 // and the minimap parse it only once.
+//
+// ucf-campus.bytes (little-endian): "DWCP", uint16 version 1, uint16 0; int32 chunk count, then per chunk int32
+// layer, vertex count, index count, int16 x, y decimetres per vertex, uint16 indices; int32 building count, then per
+// building int32 height (dm), ring count, index count, int32 points per ring, int16 x, y dm, uint16 indices.
+// ucf-campus.json: attribution, middle, min, max, the floor plan's geo block it was built with, and the buildings.
 public class CampusData
 {
     [Serializable]
@@ -81,8 +86,12 @@ public class CampusData
         public float[] middle;
         public float[] min;
         public float[] max;
+        public PlanGeo geo;
         public Building[] buildings;
     }
+
+    const string Magic = "DWCP";
+    const int Version = 1;
 
     public readonly Chunk[] chunks;
     public readonly Building[] buildings;
@@ -92,64 +101,90 @@ public class CampusData
     public readonly Vector2 middle;
     public readonly Rect extent;
     public readonly string attribution;
+    // The floor plan's geo block the campus was projected with (null in a file from before it was recorded).
+    public readonly PlanGeo geo;
 
     static readonly Dictionary<TextAsset, CampusData> s_Loaded = new Dictionary<TextAsset, CampusData>();
 
-    // The file while reading it.
-    byte[] m_Bytes;
-    int m_At;
-
-    // Null if either file is missing (the map then shows the floor alone).
+    // Null if either file is missing (the map then shows the floor alone). FormatException, naming the file and
+    // the problem, if one is broken.
     public static CampusData Load(TextAsset geometry, TextAsset info)
     {
         if (geometry == null || info == null)
             return null;
         if (!s_Loaded.TryGetValue(geometry, out CampusData campus))
         {
-            campus = new CampusData(geometry.bytes, info.text);
+            campus = Parse(geometry.bytes, info.text, geometry.name);
             s_Loaded[geometry] = campus;
         }
         return campus;
     }
 
-    CampusData(byte[] bytes, string json)
+    // Reads the pair without keeping it (the editor's data check, tests).
+    public static CampusData Parse(byte[] bytes, string json, string name)
     {
-        Info info = JsonUtility.FromJson<Info>(json);
+        return new CampusData(bytes, json, name ?? "ucf-campus");
+    }
+
+    CampusData(byte[] bytes, string json, string name)
+    {
+        Info info;
+        try
+        {
+            info = JsonUtility.FromJson<Info>(json ?? "");
+        }
+        catch (Exception e)
+        {
+            throw new FormatException($"{name}.json: not valid JSON ({e.Message})");
+        }
+        if (info == null || info.middle == null || info.middle.Length < 2 || info.min == null || info.min.Length < 2
+            || info.max == null || info.max.Length < 2)
+            throw new FormatException($"{name}.json: middle, min or max is missing");
         attribution = info.attribution;
         middle = new Vector2(info.middle[0], info.middle[1]);
         extent = Rect.MinMaxRect(info.min[0], info.min[1], info.max[0], info.max[1]);
+        geo = info.geo != null && info.geo.IsSet ? info.geo : null;
 
-        m_Bytes = bytes;
-        m_At = 0;
-        chunks = new Chunk[Int()];
+        var reader = new DataReader(bytes, name);
+        reader.Header(Magic, Version);
+        reader.UInt16();
+        chunks = new Chunk[reader.Count("chunks", 12)];
         for (int c = 0; c < chunks.Length; c++)
         {
-            int layer = Int(), vertexCount = Int(), indexCount = Int();
-            chunks[c] = new Chunk { layer = layer, points = Points(vertexCount), triangles = Indices(indexCount) };
+            int layer = reader.Int32();
+            int vertexCount = reader.Count("ground points", 4);
+            int indexCount = reader.Int32();
+            Vector2[] points = reader.Points(vertexCount, 0.1f);
+            chunks[c] = new Chunk { layer = layer, points = points, triangles = Indices(reader, indexCount, vertexCount) };
         }
 
-        int buildingCount = Int();
+        int buildingCount = reader.Count("buildings", 12);
         int names = info.buildings?.Length ?? 0;
         if (buildingCount != names)
-            throw new FormatException($"ucf-campus: {buildingCount} buildings but {names} names");
+            throw reader.Fail($"{buildingCount} buildings but {names} names in {name}.json");
         buildings = info.buildings ?? new Building[0];
         for (int b = 0; b < buildings.Length; b++)
         {
             Building building = buildings[b];
             building.index = b;
-            Int();   // the height again; the info's is the same
-            int ringCount = Int(), indexCount = Int();
+            reader.Int32();   // the height again; the info's is the same
+            int ringCount = reader.Count("rings", 4), indexCount = reader.Int32();
             building.rings = new int[ringCount];
             int total = 0;
             for (int r = 0; r < ringCount; r++)
-                total += building.rings[r] = Int();
-            building.points = Points(total);
-            building.roof = Indices(indexCount);
+            {
+                int count = reader.Int32();
+                if (count < 0)
+                    throw reader.Fail($"building {b} has a ring of {count} points");
+                total += building.rings[r] = count;
+            }
+            building.points = reader.Points(total, 0.1f);
+            building.roof = Indices(reader, indexCount, total);
             building.bounds = Bounds(building.points);
             if (building.indoor && indoor == null)
                 indoor = building;
         }
-        m_Bytes = null;
+        reader.End();
     }
 
     static Rect Bounds(Vector2[] points)
@@ -165,28 +200,19 @@ public class CampusData
         return Rect.MinMaxRect(min.x, min.y, max.x, max.y);
     }
 
-    // Little-endian, like the file (BitConverter uses the machine's order; Android ARM and PCs are little-endian).
-    int Int()
+    // Triangle indices (uint16), each checked against the points they index.
+    static ushort[] Indices(DataReader reader, int count, int points)
     {
-        int value = BitConverter.ToInt32(m_Bytes, m_At);
-        m_At += 4;
-        return value;
-    }
-
-    // Plan decimetres in the file, metres here.
-    Vector2[] Points(int count)
-    {
-        var points = new Vector2[count];
-        for (int i = 0; i < count; i++, m_At += 4)
-            points[i] = new Vector2(BitConverter.ToInt16(m_Bytes, m_At), BitConverter.ToInt16(m_Bytes, m_At + 2)) * 0.1f;
-        return points;
-    }
-
-    ushort[] Indices(int count)
-    {
+        if (count < 0 || count % 3 != 0)
+            throw reader.Fail($"{count} indices, not a whole number of triangles");
         var indices = new ushort[count];
-        for (int i = 0; i < count; i++, m_At += 2)
-            indices[i] = BitConverter.ToUInt16(m_Bytes, m_At);
+        for (int i = 0; i < count; i++)
+        {
+            int v = reader.UInt16();
+            if (v >= points)
+                throw reader.Fail($"index {v} is past its {points} points");
+            indices[i] = (ushort)v;
+        }
         return indices;
     }
 }

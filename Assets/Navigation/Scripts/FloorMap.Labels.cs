@@ -26,8 +26,10 @@ public partial class FloorMap
     List<Marker> m_Badges = new List<Marker>();
     List<Marker> m_BuildingLabels = new List<Marker>();
     readonly List<Rect> m_Taken = new List<Rect>();
+    Canvas[][] m_KeepClearCanvases;   // the canvases each keepClear rect is drawn by
 
-    // Every marker starts invisible and fades in from Layout.
+    // Every marker starts invisible and fades in from Layout. It's switched on here so its size can be measured;
+    // the caller switches it off again until it shows.
     static Marker AddMarker(RectTransform rect, Vector2 position)
     {
         rect.gameObject.SetActive(true);
@@ -79,20 +81,33 @@ public partial class FloorMap
 
         Vector2 half = Window.rect.size * 0.5f + new Vector2(40f, 40f);   // fade in just before coming on screen
         float scale = pixelsPerMeter * m_Zoom;   // px per metre
+        bool floor = m_Indoor > 0.5f;
 
+        // Room numbers and icons only on the floor (out over the campus, or of another kind than the chip's, they
+        // can't show): those already faded out are left where they are, switched off.
         foreach (Marker badge in m_Badges)
         {
+            bool kind = floor && (m_Kind == null || badge.place.kind == m_Kind);
+            if (!kind && badge.alpha <= 0f)
+            {
+                badge.shown = false;
+                continue;
+            }
             Vector2 at = ToWindow(badge.position);
             badge.rect.anchoredPosition = at;
-            bool kind = m_Indoor > 0.5f && (m_Kind == null || badge.place.kind == m_Kind);
             badge.shown = kind && OnScreen(at, half) && (m_Kind != null || Claim(at, badge.size));
         }
 
         foreach (Marker label in m_Labels)
         {
+            bool fits = floor && label.area * scale * scale * squash >= labelRoom * label.size.x * label.size.y;
+            if (!fits && label.alpha <= 0f)
+            {
+                label.shown = false;
+                continue;
+            }
             Vector2 at = ToWindow(label.position);
             label.rect.anchoredPosition = at;
-            bool fits = m_Indoor > 0.5f && label.area * scale * scale * squash >= labelRoom * label.size.x * label.size.y;
             label.shown = fits && OnScreen(at, half) && Claim(at, label.size);
         }
 
@@ -101,19 +116,26 @@ public partial class FloorMap
         // In the editor nothing fades: the built scene shows each marker as it will settle.
         if (!Application.isPlaying)
         {
-            Fade(m_Labels, 1f, false);
-            Fade(m_Badges, 1f, false);
-            Fade(m_BuildingLabels, 1f, true);
+            Fade(m_Labels, 1f);
+            Fade(m_Badges, 1f);
+            Fade(m_BuildingLabels, 1f);
         }
     }
 
     // The map's credit and buttons: labels keep out from under them while they show.
     void ClaimKeepClear()
     {
-        Vector2 middle = Window.rect.center;
-        foreach (RectTransform rect in keepClear)
+        if (m_KeepClearCanvases == null || m_KeepClearCanvases.Length != keepClear.Length)
         {
-            if (rect == null || !rect.gameObject.activeInHierarchy)
+            m_KeepClearCanvases = new Canvas[keepClear.Length][];
+            for (int i = 0; i < keepClear.Length; i++)
+                m_KeepClearCanvases[i] = keepClear[i] != null ? keepClear[i].GetComponentsInParent<Canvas>(true) : new Canvas[0];
+        }
+        Vector2 middle = Window.rect.center;
+        for (int i = 0; i < keepClear.Length; i++)
+        {
+            RectTransform rect = keepClear[i];
+            if (rect == null || !rect.gameObject.activeInHierarchy || Hidden(m_KeepClearCanvases[i]))
                 continue;
             // Not while it's faded out (its own group, or a panel it's on).
             CanvasGroup group = rect.GetComponent<CanvasGroup>();
@@ -238,9 +260,19 @@ public partial class FloorMap
         return true;
     }
 
-    // Steps each marker's alpha toward shown or hidden. off: switched off once faded out, so the many that
-    // aren't showing cost nothing.
-    static void Fade(List<Marker> markers, float step, bool off)
+    // A part of the screen hidden by switching its canvases off (NavigationScreen does that to a sheet) still has
+    // its GameObjects on.
+    static bool Hidden(Canvas[] canvases)
+    {
+        foreach (Canvas canvas in canvases)
+            if (canvas != null && !canvas.enabled)
+                return true;
+        return false;
+    }
+
+    // Steps each marker's alpha toward shown or hidden, switched off once faded out, so the many that aren't
+    // showing cost nothing: no batching, no drawing.
+    static void Fade(List<Marker> markers, float step)
     {
         foreach (Marker marker in markers)
         {
@@ -249,11 +281,11 @@ public partial class FloorMap
             float target = marker.shown ? 1f : 0f;
             if (marker.alpha == target)
                 continue;
-            if (off && marker.shown && !marker.rect.gameObject.activeSelf)
+            if (marker.shown && !marker.rect.gameObject.activeSelf)
                 marker.rect.gameObject.SetActive(true);
             marker.alpha = Mathf.MoveTowards(marker.alpha, target, step);
             marker.group.alpha = marker.alpha;
-            if (off && marker.alpha == 0f)
+            if (marker.alpha == 0f)
                 marker.rect.gameObject.SetActive(false);
         }
     }

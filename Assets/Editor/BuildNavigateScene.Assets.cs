@@ -115,7 +115,8 @@ public static partial class BuildNavigateScene
         return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
     }
 
-    // The launch screen's logo: mipmapped, as it's drawn smaller than it is. Optional.
+    // The launch screen's logo: mipmapped, as it's drawn smaller than it is, and compressed (high quality: it's a
+    // smooth picture, and both themes' copies are loaded with the scene). Optional.
     static Texture2D ImportLogo(string theme)
     {
         string path = $"{UIFolder}/Logo-{theme}.png";
@@ -128,7 +129,7 @@ public static partial class BuildNavigateScene
         if (importer.textureType != TextureImporterType.Default || importer.npotScale != TextureImporterNPOTScale.None
             || !importer.mipmapEnabled || !importer.alphaIsTransparency || importer.wrapMode != TextureWrapMode.Clamp
             || importer.filterMode != FilterMode.Trilinear
-            || importer.textureCompression != TextureImporterCompression.Uncompressed)
+            || importer.textureCompression != TextureImporterCompression.CompressedHQ)
         {
             importer.textureType = TextureImporterType.Default;
             importer.npotScale = TextureImporterNPOTScale.None;
@@ -136,7 +137,7 @@ public static partial class BuildNavigateScene
             importer.alphaIsTransparency = true;
             importer.wrapMode = TextureWrapMode.Clamp;
             importer.filterMode = FilterMode.Trilinear;
-            importer.textureCompression = TextureImporterCompression.Uncompressed;
+            importer.textureCompression = TextureImporterCompression.CompressedHQ;
             importer.SaveAndReimport();
         }
         return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
@@ -205,8 +206,12 @@ public static partial class BuildNavigateScene
         }
 
         SetIcons(AndroidPlatformIconKind.Adaptive, icons[0], icons[1]);   // background, then foreground
+        // Unity 6 marks these obsolete, but the app still installs on Android 7.1 (API 25), which has no adaptive
+        // icons: without them its launchers would show Unity's default.
+#pragma warning disable CS0618
         SetIcons(AndroidPlatformIconKind.Round, icons[2]);
         SetIcons(AndroidPlatformIconKind.Legacy, icons[3]);
+#pragma warning restore CS0618
     }
 
     static void SetIcons(PlatformIconKind kind, params Texture2D[] layers)

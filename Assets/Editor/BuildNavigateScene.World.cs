@@ -1,3 +1,4 @@
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.UI;
@@ -7,6 +8,8 @@ using static UIBuild;
 // What's drawn in AR: the Navigator, its plan root, the route on the floor and the destination pin.
 public static partial class BuildNavigateScene
 {
+    const string WalkablePath = DataFolder + "/ba1-floor1-walkable.bytes";
+
     static Navigator CreateNavigator(TextAsset planJson, Transform arCamera, ARPlaneManager planes)
     {
         var go = new GameObject("Navigator");
@@ -32,6 +35,10 @@ public static partial class BuildNavigateScene
         var ribbon = ribbonGo.AddComponent<RouteRibbon>();   // builds its mesh at runtime
 
         navigator.planJson = planJson;
+        // Where a person can stand (Tools/ba1-floor1/walkable.py). Without it the app guides as before: no walls.
+        navigator.walkable = AssetDatabase.LoadAssetAtPath<TextAsset>(WalkablePath);
+        if (navigator.walkable == null)
+            Debug.LogWarning($"[Navigation] No {WalkablePath}: guiding without walls.");
         navigator.arCamera = arCamera;
         navigator.planeManager = planes;
         navigator.planRoot = planRoot;

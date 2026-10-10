@@ -118,6 +118,7 @@ public partial class NavigationScreen
     int m_BuildingRows;
     string m_SpinnerFor;
     CanvasGroup[] m_Panels;
+    Dictionary<GameObject, Layer> m_Layers;   // the parts shown and hidden by their canvases, by root
     float m_NextThemeCheck;
 
     int m_Marker;

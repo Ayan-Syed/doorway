@@ -1,0 +1,32 @@
+// The Gradle module for DoorwayTextReader.java, set out as Unity 6.3's "Create an Android Library plug-in" page has
+// it. Unity adds this .androidlib to settings.gradle and to unityLibrary's dependencies by itself. ML Kit is a
+// dependency of this module rather than of unityLibrary, because Unity 6.3 no longer lets an
+// AndroidProjectFilesModifier change unityLibrary's build.gradle.
+apply plugin: 'com.android.library'
+
+dependencies {
+    // Text recognition v2 with the Latin model bundled in the APK: no Play Services download, works offline.
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
+}
+
+android {
+    namespace "com.ayansyed.doorway.textreader"
+    compileSdk getProperty("unity.compileSdkVersion") as int
+    buildToolsVersion getProperty("unity.buildToolsVersion")
+
+    compileOptions {
+        sourceCompatibility JavaVersion.valueOf(getProperty("unity.javaCompatabilityVersion"))
+        targetCompatibility JavaVersion.valueOf(getProperty("unity.javaCompatabilityVersion"))
+    }
+
+    defaultConfig {
+        minSdk getProperty("unity.minSdkVersion") as int
+        targetSdk getProperty("unity.targetSdkVersion") as int
+        // Unity calls the reader by name, so a minified build must keep it.
+        consumerProguardFiles 'proguard-rules.pro'
+    }
+
+    lint {
+        abortOnError false
+    }
+}

@@ -1,12 +1,30 @@
 using System;
 using UnityEngine;
+using UnityEngine.UI;
 
 // Guide (walking) and Arrived.
 public partial class NavigationScreen
 {
-    // The Start button: the user stands with their back to the door, phone up.
+    // When the plan may no longer match the hallway (tracking lost for a while, back from the background, or the
+    // walls lost the user): the status pill says this, and tapping it re-aligns.
+    const string RealignStatus = "Re-align at the nearest door";
+
+    [Header("Guidance: re-align")]
+    [Tooltip("On the status pill: re-aligns while it asks the user to.")]
+    public Button statusButton;
+    [Tooltip("The Re-align pill's background and label: in the accent colour while re-aligning is asked for.")]
+    public Image realignBackground;
+    public Text realignLabel;
+
+    bool m_StatusWired;
+    int m_RealignStyle = -1;
+
+    // The Start button: the user stands with their back to the door, phone up. While AR can't run it does what
+    // can be done about that instead (Align).
     void Begin()
     {
+        if (FixAR())
+            return;
         navigator.Begin(m_From, m_Destination);
         if (navigator.Route == null)
             return;
@@ -27,6 +45,12 @@ public partial class NavigationScreen
         m_ShownProgress = -1f;
         m_StatusY = float.NaN;
         m_EndStyle = -1;
+        m_RealignStyle = -1;
+        if (!m_StatusWired && statusButton != null)
+        {
+            m_StatusWired = true;
+            statusButton.onClick.AddListener(Realign);
+        }
         miniMap.Select(m_Destination);
         miniMap.ShowPin(miniMap.Anchor(m_Destination), null);
         UpdateGuide(true);
@@ -76,12 +100,17 @@ public partial class NavigationScreen
                 Haptics.Tick(60);
         }
 
-        if (!navigator.IsTracking)
+        // Each with hysteresis in Navigator: a blink of lost tracking or a step across the warning line says nothing.
+        bool realign = navigator.ShouldRealign;
+        if (realign)
+            SetStatus(RealignStatus, PlaceStyle.Bad);
+        else if (navigator.TrackingLost)
             SetStatus(TrackingLostStatus, PlaceStyle.Bad);
-        else if (navigator.OffRoute > Navigator.OffRouteWarning)
+        else if (navigator.IsOffRoute)
             SetStatus(OffRouteStatus, PlaceStyle.Waiting);
         else
             SetStatus(null, default);
+        StyleRealign(realign, instant);
 
         // What's left, and the clock time you'll be there (checked each second, or as the distance changes).
         float remaining = navigator.Remaining;
@@ -134,6 +163,34 @@ public partial class NavigationScreen
             m_StatusY = y;
             statusPill.anchoredPosition = new Vector2(statusPill.anchoredPosition.x, y);
         }
+    }
+
+    // Asking to re-align: the pill takes taps, the Re-align button turns the accent colour, and one buzz. The
+    // colours are checked every frame (a compare), since a day/night switch repaints the button its usual way.
+    void StyleRealign(bool asking, bool instant)
+    {
+        Theme theme = Theme.Current;
+        if (realignBackground != null)
+        {
+            Color background = asking ? theme.primary : theme.surfaceVariant;
+            if (realignBackground.color != background)
+                realignBackground.color = background;
+        }
+        if (realignLabel != null)
+        {
+            Color ink = asking ? theme.onPrimary : theme.onSurface;
+            if (realignLabel.color != ink)
+                realignLabel.color = ink;
+        }
+        int style = asking ? 1 : 0;
+        if (style == m_RealignStyle)
+            return;
+        bool styled = m_RealignStyle >= 0;
+        m_RealignStyle = style;
+        if (statusButton != null)
+            statusButton.interactable = asking;
+        if (asking && styled && !instant)
+            Haptics.Tick(60);
     }
 
     // Two taps, so a stray touch never ends the walk.

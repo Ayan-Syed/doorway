@@ -3,9 +3,24 @@ using UnityEngine.UI;
 using UnityEngine.XR.ARFoundation;
 
 // Align ("line up"): the route on the map turned the way the user will face, other doors nearby, and Start once
-// AR is tracking.
+// AR is tracking. When AR can't run (no ARCore, no camera permission, AR services not installed) the Start button
+// says why, and does what can be done about it.
 public partial class NavigationScreen
 {
+    // What stands between the user and AR, on the Align screen.
+    enum ARBlock { None, Unsupported, NoCamera, NotInstalled }
+
+    const string UnsupportedLabel = "AR isn't supported on this phone";
+    const string UnsupportedHint = "This phone can't run Google's AR, so the way can't be drawn on the floor. " +
+                                   "The map still shows the route.";
+    const string NoCameraLabel = "Open settings";
+    const string NoCameraHint = "Camera access is off. Doorway draws the way on the floor through the camera: " +
+                                "turn on Camera under Permissions.";
+    const string NotInstalledLabel = "Install AR services";
+    const string NotInstalledHint = "Doorway needs Google Play Services for AR to draw the way on the floor.";
+
+    string m_AlignHintText;   // what to do at this door, while nothing's blocking AR
+
     // auto: the door was picked from the phone's location. near: where to look for other doors to offer (null:
     // round this door). False, with a word why, if there's no route from there.
     bool ShowAlign(PlanPlace place, PlanDoor door, bool auto, Vector2? near)
@@ -35,9 +50,12 @@ public partial class NavigationScreen
 
         alignTime.text = Minutes(route.length);
         alignDistance.text = $"({Feet(route.length)})";
-        alignHint.text = $"{PlaceStyle.StandHint(place.kind)} Then hold your phone up and tap Start.";
+        m_AlignHintText = $"{PlaceStyle.StandHint(place.kind)} Then hold your phone up and tap Start.";
+        alignHint.text = m_AlignHintText;
         m_NearbyAt = near;
-        FillNearby(near ?? Plan.NodePosition(door.node), door);
+        // A point from the phone's location is as rough as the fix; a door's spot is exact.
+        float accuracy = near.HasValue && location != null && location.HasFix ? location.Accuracy : 0f;
+        FillNearby(near ?? Plan.NodePosition(door.node), accuracy, door);
 
         Show(Step.Align);
         OpenSheet(alignSheet, 0);
@@ -57,10 +75,10 @@ public partial class NavigationScreen
     }
 
     // "Not here?": the doors nearest a point, other than the one picked; entrances if it's outside.
-    void FillNearby(Vector2 at, PlanDoor current)
+    void FillNearby(Vector2 at, float accuracy, PlanDoor current)
     {
         m_Nearby.Clear();
-        bool outside = Outside(at);
+        bool outside = Outside(at, accuracy);
         foreach (var (place, door, _) in DoorsNear(at))
         {
             if (m_Nearby.Count == nearbyChips.Length)
@@ -79,13 +97,68 @@ public partial class NavigationScreen
         }
     }
 
-    // Every frame on Align: Start works only while AR tracks; until then it says what AR is doing.
+    // Every frame on Align: Start works only while AR tracks; until then it says what AR is doing, and if AR
+    // can't start, why, and what to tap.
     void UpdateAlign()
     {
-        bool tracking = navigator.IsTracking;
-        SetInteractable(beginButton, tracking);
-        beginLabel.text = tracking ? "Start" : WaitingForAR();
-        ShowBeginSpinner(!tracking && ARSession.state != ARSessionState.Unsupported);
+        if (Application.isPlaying && location != null)
+            navigator.HoldAR = location.IsAsking;
+        ARBlock block = BlockedAR();
+        bool ready = block == ARBlock.None && navigator.IsTracking;
+        bool fix = block == ARBlock.NoCamera || block == ARBlock.NotInstalled;
+        SetInteractable(beginButton, ready || fix);
+        beginLabel.text = ready ? "Start" : block != ARBlock.None ? BlockedLabel(block) : WaitingForAR();
+        alignHint.text = block != ARBlock.None ? BlockedHint(block) : m_AlignHintText ?? alignHint.text;
+        ShowBeginSpinner(!ready && block == ARBlock.None);
+    }
+
+    ARBlock BlockedAR()
+    {
+        if (!Application.isPlaying)
+            return ARBlock.None;
+        if (ARSession.state == ARSessionState.Unsupported)
+            return ARBlock.Unsupported;
+        if (navigator.CameraDenied)
+            return ARBlock.NoCamera;
+        return navigator.InstallDeclined ? ARBlock.NotInstalled : ARBlock.None;
+    }
+
+    static string BlockedLabel(ARBlock block)
+    {
+        switch (block)
+        {
+            case ARBlock.Unsupported: return UnsupportedLabel;
+            case ARBlock.NoCamera: return NoCameraLabel;
+            default: return NotInstalledLabel;
+        }
+    }
+
+    static string BlockedHint(ARBlock block)
+    {
+        switch (block)
+        {
+            case ARBlock.Unsupported: return UnsupportedHint;
+            case ARBlock.NoCamera: return NoCameraHint;
+            default: return NotInstalledHint;
+        }
+    }
+
+    // The Start button while AR is blocked: what can be done about it. True if it was blocked.
+    bool FixAR()
+    {
+        switch (BlockedAR())
+        {
+            case ARBlock.NoCamera:
+                OpenAppSettings();
+                return true;
+            case ARBlock.NotInstalled:
+                navigator.InstallAR();
+                return true;
+            case ARBlock.Unsupported:
+                return true;
+            default:
+                return false;
+        }
     }
 
     string WaitingForAR()
@@ -93,13 +166,38 @@ public partial class NavigationScreen
         switch (ARSession.state)
         {
             case ARSessionState.Unsupported:
-                return "AR isn't supported here";
+                return UnsupportedLabel;
             case ARSessionState.NeedsInstall:
             case ARSessionState.Installing:
                 return "Installing AR services…";
             default:
                 return Time.unscaledTime - m_StartedTime < StartingARSeconds ? "Starting AR…" : "Look around slowly…";
         }
+    }
+
+    // Android's page for this app (Permissions is one tap in). Coming back, Navigator starts AR again once the
+    // camera is allowed.
+    static void OpenAppSettings()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (var player = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+            using (AndroidJavaObject activity = player.GetStatic<AndroidJavaObject>("currentActivity"))
+            using (var uris = new AndroidJavaClass("android.net.Uri"))
+            using (AndroidJavaObject uri = uris.CallStatic<AndroidJavaObject>("parse", "package:" + Application.identifier))
+            using (var intent = new AndroidJavaObject("android.content.Intent",
+                       "android.settings.APPLICATION_DETAILS_SETTINGS", uri))
+            {
+                intent.Call<AndroidJavaObject>("addFlags", 0x10000000).Dispose();   // FLAG_ACTIVITY_NEW_TASK
+                activity.Call("startActivity", intent);
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"[Navigation] Couldn't open the app's settings: {e.Message}");
+        }
+#endif
     }
 
     // Turning just left of the label while AR gets going. Placed only when the label changes, so its width

@@ -16,6 +16,8 @@ public class PlaceList : MonoBehaviour
     [Tooltip("Optional: typing in it filters the list.")]
     public InputField searchField;
     public Text emptyText;
+    [Tooltip("While something is typed, at most this many rows show (0: no limit).")]
+    public int maxSearchRows = 30;
 
     // How many rows the last filter left showing.
     public int Shown { get; private set; }
@@ -24,8 +26,10 @@ public class PlaceList : MonoBehaviour
     {
         public PlaceListRow view;
         public string kind;
+        public string title;
         public string searchText;
         public bool searchOnly;
+        public bool fitted;      // a search-only row's title, cut to the row's width the first time it shows
         public int section;
         public bool shown;
     }
@@ -93,6 +97,8 @@ public class PlaceList : MonoBehaviour
     }
 
     // A row under the last section. searchOnly: shown only while something is typed (the campus's buildings).
+    // Those many rows can come on together as the first letter is typed, so their text is one fixed size, not
+    // best fit (which lays the text out again and again to find its size), and a long name is cut short instead.
     public void AddRow(string kind, string title, string detail, UnityAction onTap, bool searchOnly = false)
     {
         Initialize();
@@ -104,17 +110,62 @@ public class PlaceList : MonoBehaviour
         view.detail.gameObject.SetActive(hasDetail);
         if (onTap != null)
             view.button.onClick.AddListener(onTap);
+        if (searchOnly)
+        {
+            FixedSize(view.title);
+            FixedSize(view.detail);
+        }
         view.gameObject.SetActive(!searchOnly);
 
         m_Rows.Add(new Row
         {
             view = view,
             kind = kind,
+            title = title,
             searchText = $"{title} {detail} {PlaceStyle.Keywords(kind)}".ToLowerInvariant(),
             searchOnly = searchOnly,
             section = m_Sections.Count - 1,
             shown = !searchOnly,
         });
+    }
+
+    // One line at the template's size. It may overflow its box: Google Sans's lines are taller than their size,
+    // and a line that may not overflow draws nothing (the scene builder does the same for every fixed text).
+    static void FixedSize(Text text)
+    {
+        text.resizeTextForBestFit = false;
+        text.horizontalOverflow = HorizontalWrapMode.Overflow;
+        text.verticalOverflow = VerticalWrapMode.Overflow;
+    }
+
+    // A title cut with "…" to the width its row gives it: measured with the text's own layout, once, the first
+    // time the row shows (the list's width is only known once it's laid out).
+    void Fit(Row row)
+    {
+        Text text = row.view.title;
+        var column = text.rectTransform.parent as RectTransform;
+        float width = content == null ? 0f
+            : content.rect.width - (column != null ? column.offsetMin.x - column.offsetMax.x : 0f) - 4f;
+        if (width <= 0f)
+            return;   // not laid out yet: try again next time it shows
+        row.fitted = true;
+        TextGenerationSettings settings = text.GetGenerationSettings(Vector2.zero);
+        TextGenerator generator = text.cachedTextGeneratorForLayout;
+        string value = row.title;
+        float full = generator.GetPreferredWidth(value, settings) / text.pixelsPerUnit;
+        if (full <= width)
+            return;
+        // Cut in proportion, back to a word if there's one, and check; a few tries at most.
+        for (int tries = 0; tries < 4 && value.Length > 1; tries++)
+        {
+            int keep = Mathf.Clamp(Mathf.FloorToInt(value.Length * width / full) - 1, 1, value.Length - 1);
+            int space = value.LastIndexOf(' ', keep);
+            value = value.Substring(0, space > keep / 2 ? space : keep).TrimEnd(' ', ',', '-', '·');
+            full = generator.GetPreferredWidth(value + "…", settings) / text.pixelsPerUnit;
+            if (full <= width)
+                break;
+        }
+        text.text = value + "…";
     }
 
     // Only places of this kind (a filter chip), or every kind for null.
@@ -170,10 +221,15 @@ public class PlaceList : MonoBehaviour
         for (int i = 0; i < m_Sections.Count; i++)
             m_SectionHas.Add(false);
 
+        // Typing, only the first rows that match: every row shown costs layout and text, and a screenful is plenty.
+        int limit = words.Length > 0 && maxSearchRows > 0 ? maxSearchRows : int.MaxValue;
         int shown = 0;
         foreach (Row row in m_Rows)
         {
-            bool match = (m_Kind == null || row.kind == m_Kind) && (!row.searchOnly || (m_Wide && words.Length > 0)) && HasAll(row.searchText, words);
+            bool match = shown < limit && (m_Kind == null || row.kind == m_Kind)
+                         && (!row.searchOnly || (m_Wide && words.Length > 0)) && HasAll(row.searchText, words);
+            if (match && row.searchOnly && !row.fitted)
+                Fit(row);
             if (match != row.shown)
             {
                 row.shown = match;
