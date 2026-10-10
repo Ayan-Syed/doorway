@@ -31,6 +31,6 @@ Material:
     m_Floats:
     - _ScrollSpeed: 0
     m_Colors:
-    - _Color: {r: 0.8509804, g: 0.1882353, b: 0.14509805, a: 1}
+    - _Color: {r: 0.72156864, g: 0.22352941, b: 0.41960785, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

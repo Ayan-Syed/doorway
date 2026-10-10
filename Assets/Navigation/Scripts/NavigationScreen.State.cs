@@ -114,6 +114,7 @@ public partial class NavigationScreen
     bool m_OnCampus;
     bool m_Indoors = true;
     float m_IndoorChrome = 1f;
+    float m_ListTop = float.NaN;   // the directory list's top offset under the sheet's search box (FitList)
     bool m_Launching;
     float m_LaunchTime = -1f;
     List<CampusData.Building> m_BuildingList;

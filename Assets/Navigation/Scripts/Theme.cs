@@ -1,11 +1,14 @@
 using UnityEngine;
 
-// The app's colours. The scene builder bakes campus (day) and knight (night) into the UI, and Settings
+// The app's colours. The scene builder bakes iris (day) and dusk (night) into the UI, and Settings
 // switches between them (ThemeColors); code that colours things at runtime reads Theme.Current.
-//   campus  light, map-app blue on white, green guidance banner
+//   iris    the app's own look: slate indigo (424874) on lavender-white, lavender (DCD6F7), periwinkle
+//           (A6B1E1), cool grey (CACFD6) and mint-grey (D6E5E3); a raspberry pin is the one warm colour
+//   dusk    iris by night: deep indigo surfaces, periwinkle for the route and buttons
+//   campus  light, map-app blue on white, green guidance banner (the first look; -theme campus)
 //   paper   warm off-white, ink and vermilion, like a printed building directory (previews only)
-//   knight  black and UCF gold
-// Paper stays because the builder takes -theme paper, and the basemap, logo and icons are made for it.
+//   knight  black and UCF gold (the first night look)
+// The older three stay because the builder takes -theme, and the basemap, logo and icons are made for them.
 public class Theme
 {
     public string name;
@@ -164,18 +167,104 @@ public class Theme
         buildingSide = C(0x26, 0x26, 0x24),
     };
 
-    public static readonly Theme[] All = { Campus, Paper, Knight };
+    public static readonly Theme Iris = new Theme
+    {
+        name = "iris",
+        surface = C(0xF8, 0xF7, 0xFD),
+        surfaceVariant = C(0xEA, 0xE7, 0xF8),
+        onSurface = C(0x22, 0x25, 0x45),
+        onSurfaceVariant = C(0x5D, 0x61, 0x85),
+        outline = C(0xCA, 0xCF, 0xD6),
+        inverseSurface = C(0x2B, 0x2F, 0x52),
+        onInverseSurface = C(0xF1, 0xEF, 0xFB),
+        primary = C(0x42, 0x48, 0x74),
+        onPrimary = C(0xFF, 0xFF, 0xFF),
+        primaryContainer = C(0xDC, 0xD6, 0xF7),
+        routeCasing = C(0x2A, 0x2E, 0x52),
+        banner = C(0x42, 0x48, 0x74),
+        bannerDark = C(0x32, 0x37, 0x5E),
+        onBanner = C(0xFF, 0xFF, 0xFF),
+        destination = C(0xB8, 0x39, 0x6B),
+        onDestination = C(0xFF, 0xFF, 0xFF),
+        good = C(0x2F, 0x7A, 0x5B),
+        warning = C(0xB8, 0x6E, 0x1A),
+        error = C(0xB3, 0x36, 0x4A),
+        mapGround = C(0xD6, 0xE5, 0xE3),
+        mapLabel = C(0x4E, 0x53, 0x7C),
+        mapLabelHalo = C(0xF8, 0xF7, 0xFD, 0xE6),
+        room = C(0x6A, 0x6F, 0x8C),
+        restroom = C(0x3D, 0x7A, 0x82),
+        elevator = C(0x6E, 0x5A, 0xAE),
+        stairs = C(0x8E, 0x5E, 0x8A),
+        exit = C(0x2F, 0x6F, 0x62),
+        onPlace = C(0xFF, 0xFF, 0xFF),
+        wallTop = C(0xCA, 0xCF, 0xD6),
+        wallSide = C(0xA9, 0xAE, 0xC0),
+        campusLayers = new[]
+        {
+            C(0xE6, 0xE9, 0xEE), C(0xD6, 0xE5, 0xE3), C(0xCB, 0xDD, 0xDA), C(0xC2, 0xD6, 0xD3),
+            C(0xE8, 0xE5, 0xF0), C(0xDE, 0xE1, 0xE8), C(0xA6, 0xB1, 0xE1), C(0xF8, 0xF7, 0xFD),
+            C(0xCA, 0xCF, 0xD6), C(0xA6, 0xB1, 0xE1), C(0xFF, 0xFF, 0xFF), C(0xDC, 0xD6, 0xF7),
+        },
+        buildingTop = C(0xEC, 0xEB, 0xF3),
+        buildingSide = C(0xCA, 0xCF, 0xD6),
+    };
+
+    public static readonly Theme Dusk = new Theme
+    {
+        name = "dusk",
+        surface = C(0x1F, 0x22, 0x40),
+        surfaceVariant = C(0x2E, 0x32, 0x58),
+        onSurface = C(0xEE, 0xEB, 0xFB),
+        onSurfaceVariant = C(0xB4, 0xB8, 0xD6),
+        outline = C(0x3B, 0x40, 0x68),
+        inverseSurface = C(0xEE, 0xEB, 0xFB),
+        onInverseSurface = C(0x1F, 0x22, 0x40),
+        primary = C(0xA6, 0xB1, 0xE1),
+        onPrimary = C(0x1A, 0x1D, 0x38),
+        primaryContainer = C(0x3A, 0x3F, 0x6E),
+        routeCasing = C(0x2A, 0x2F, 0x55),
+        banner = C(0xA6, 0xB1, 0xE1),
+        bannerDark = C(0x8C, 0x98, 0xCC),
+        onBanner = C(0x1A, 0x1D, 0x38),
+        destination = C(0xF0, 0x8A, 0xAE),
+        onDestination = C(0x1A, 0x1D, 0x38),
+        good = C(0x8F, 0xD3, 0xB6),
+        warning = C(0xF2, 0xB6, 0x6B),
+        error = C(0xF0, 0x83, 0x9A),
+        mapGround = C(0x15, 0x17, 0x2C),
+        mapLabel = C(0xB4, 0xB8, 0xD6),
+        mapLabelHalo = C(0x15, 0x17, 0x2C, 0xE6),
+        room = C(0x8E, 0x93, 0xB8),
+        restroom = C(0x7F, 0xB8, 0xB2),
+        elevator = C(0xB5, 0xA6, 0xEE),
+        stairs = C(0xD9, 0xA3, 0xC8),
+        exit = C(0x8F, 0xD3, 0xB6),
+        onPlace = C(0x1A, 0x1D, 0x38),
+        wallTop = C(0x4A, 0x4F, 0x78),
+        wallSide = C(0x2B, 0x2F, 0x52),
+        campusLayers = new[]
+        {
+            C(0x1A, 0x1D, 0x34), C(0x1D, 0x2A, 0x33), C(0x21, 0x2F, 0x39), C(0x1F, 0x2C, 0x35),
+            C(0x2A, 0x2A, 0x3E), C(0x22, 0x25, 0x3E), C(0x2E, 0x38, 0x70), C(0x34, 0x38, 0x5C),
+            C(0x12, 0x14, 0x28), C(0x4A, 0x54, 0x8C), C(0x3A, 0x3E, 0x66), C(0x5A, 0x5F, 0x94),
+        },
+        buildingTop = C(0x34, 0x38, 0x60),
+        buildingSide = C(0x24, 0x27, 0x4A),
+    };
+
+    public static readonly Theme[] All = { Iris, Dusk, Campus, Paper, Knight };
 
     // After the presets: static fields initialise in order.
-    public static Theme Current { get; private set; } = Campus;
+    public static Theme Current { get; private set; } = Iris;
 
-    // The theme with this exact name, or campus.
+    // The theme with this exact name, or iris.
     public static Theme Find(string name)
     {
         foreach (Theme theme in All)
             if (theme.name == name)
                 return theme;
-        return Campus;
+        return Iris;
     }
 
     public static void Set(string name) => Current = Find(name);

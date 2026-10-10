@@ -231,11 +231,26 @@ public partial class NavigationScreen
             SetAlpha(locate, chrome);
         if (attribution != null)
             SetAlpha(attribution, chrome);
-        // The sheet's search shows once the sheet's up past its peek.
+        // The sheet's search shows once the sheet's up past its peek, but not while the search bar searches.
         if (roomSearch != null)
-            SetAlpha(roomSearch, Mathf.Clamp01((homeSheet.Height - HomePeek) / 80f));
+        {
+            SetAlpha(roomSearch, m_Searching ? 0f : Mathf.Clamp01((homeSheet.Height - HomePeek) / 80f));
+            FitList();
+        }
         if (chrome < 0.5f && m_FloorMenuOpen)
             SetFloorMenu(false);
+    }
+
+    // The list starts under the sheet's search box, or where the box would be while the search bar searches, so
+    // the results don't sit under an empty gap.
+    void FitList()
+    {
+        var list = (RectTransform)(homeList.scroll != null ? homeList.scroll.transform : homeList.transform);
+        if (float.IsNaN(m_ListTop))
+            m_ListTop = list.offsetMax.y;   // as the builder made it: under the box
+        float top = m_Searching ? ((RectTransform)roomSearch.transform).offsetMax.y : m_ListTop;
+        if (list.offsetMax.y != top)
+            list.offsetMax = new Vector2(list.offsetMax.x, top);
     }
 
     // In on the floor or out over the campus: the subtitle, Go inside or Whole floor, and the floor button (only

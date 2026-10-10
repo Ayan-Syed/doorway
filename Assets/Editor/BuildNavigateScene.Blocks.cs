@@ -6,6 +6,12 @@ using static UIBuild;
 // current theme. Every Image and Text starts with raycasts off unless a helper says otherwise.
 public static partial class BuildNavigateScene
 {
+    // Corners: soft squares rather than a map app's pills. The search bar, the my-location button and wide
+    // buttons take Corner; chips and the small buttons on the map take SmallCorner; sheets take SheetCorner.
+    const float Corner = 32f;
+    const float SmallCorner = 22f;
+    const float SheetCorner = 40f;
+
     // A rounded surface: cards, sheets, chips. No shadow. edge: a hairline round it in the outline colour, for a
     // card that would otherwise melt into the map under it. Neither part takes part in a layout group on rect.
     // Returns the surface.
@@ -74,7 +80,7 @@ public static partial class BuildNavigateScene
     static Button WideButton(RectTransform rect, string label, Color color, Color ink, out Text text)
     {
         float height = rect.rect.height;
-        Button button = MakeButton(rect, color, height > 0f ? height * 0.5f : 56f, out _);
+        Button button = MakeButton(rect, color, height > 0f ? Mathf.Min(height * 0.5f, Corner) : Corner, out _);
         button.GetComponent<PressFeedback>().pressedScale = 0.98f;
         text = TextIn(Stretch("Label", rect), label, s_SemiBold, 44, ink, TextAnchor.MiddleCenter);
         return button;

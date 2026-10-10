@@ -23,9 +23,9 @@ public partial class NavigationScreen : MonoBehaviour
 
     public Navigator navigator;
     [Tooltip("The day colour theme the scene was built with (Theme.All).")]
-    public string themeName = "campus";
+    public string themeName = "iris";
     [Tooltip("The night colour theme (ThemeColors holds its colours).")]
-    public string nightThemeName = "knight";
+    public string nightThemeName = "dusk";
     public RectTransform safeArea;
     public FloorMap map;
     [Tooltip("Draws the UI: over the map's ground while the map fills the screen, over the camera feed after.")]
