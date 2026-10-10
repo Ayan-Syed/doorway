@@ -12,6 +12,7 @@ the app needs no network: logs come off the phone with `adb`, as they do for `Re
 | `sync.py` | pulls the logs off every phone plugged in and uploads the new ones (once, or `--watch`) | your computer |
 | `upload.py` | puts a folder of walk logs and `Builds/Eval/results.csv` in a Databricks volume | your computer |
 | `ingest.py` | a Databricks notebook: rebuilds the tables from the volume, with three summary queries | Databricks |
+| `job.json` | the job that runs `ingest.py` whenever new logs land in the volume | Databricks |
 
 Tests: `Tools/tests/test_databricks.py` (no Databricks needed).
 
@@ -47,7 +48,20 @@ Android support.
 `upload.py walks` does the same for a folder of logs pulled by hand, or sent by a teammate without the workspace.
 
 Then open `Tools/databricks/ingest.py` in the Git folder and *Run all*. Every run rebuilds every table from the
-volume, so run it again whenever new logs go up.
+volume, so run it again whenever new logs go up; or let the job do it.
+
+## The job: the tables rebuild themselves
+
+`job.json` is a Databricks job that runs `ingest.py` from GitHub's `main` (no pull needed) whenever files land in
+the `logs` volume: a minute after an upload settles, one run at a time. With `sync.py --watch`, plugging a phone in
+is all it takes. Made once with
+
+```sh
+databricks jobs create --json @Tools/databricks/job.json --profile <name>
+```
+
+After changing `job.json`, update the job with `databricks jobs reset` (its id is in *Workflows → Jobs*). It
+signs in to GitHub with the linked account of whoever made it.
 
 ## The tables (in `workspace.doorway`)
 
