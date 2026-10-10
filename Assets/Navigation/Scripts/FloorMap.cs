@@ -52,6 +52,8 @@ public partial class FloorMap : MonoBehaviour, IPointerDownHandler, IPointerUpHa
     public Image puckFill;
     [Tooltip("A \"?\" badge on the marker, while the position is lost.")]
     public GameObject puckUnknown;
+    [Tooltip("A tick on the marker, for a moment after the position is confirmed.")]
+    public GameObject puckCheck;
     [Tooltip("The walls standing up off the floor, shown while the map is tilted.")]
     public WallMesh walls;
     [Tooltip("The campus round the building (Data/ucf-campus.bytes and .json); none for just the floor.")]

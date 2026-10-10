@@ -307,7 +307,9 @@ public static partial class SyntheticWalks
         }
         if (info.wrongSnap)
         {
-            // The wrong door: another entrance if this is one, else another door nearby.
+            // The wrong door: another entrance GPS can't tell from this one if this is one (SnapAlternatives: BA1's 7
+            // entrances are 15.7 to 71.5 m apart, and the pairs under ConfusableEntrance are 15.7, 18.2 and 18.3 m),
+            // else another door nearby.
             List<int> choices = SnapAlternatives(floor, spot);
             if (choices.Count > 0)
             {
@@ -528,6 +530,9 @@ public static partial class SyntheticWalks
         };
     }
 
+    /// <summary>Entrances further apart than this, metres, GPS tells apart before the user is in.</summary>
+    public const float ConfusableEntrance = 25f;
+
     public static List<int> SnapAlternatives(Floor floor, Vector2 spot)
     {
         bool entrance = false;
@@ -543,7 +548,7 @@ public static partial class SyntheticWalks
             bool isExit = false;
             foreach (Vector2 e in floor.exitSpots)
                 isExit |= (e - p).sqrMagnitude < 0.01f;
-            if (entrance ? isExit : distance <= AlternativeReach)
+            if (distance <= AlternativeReach || entrance && isExit && distance <= ConfusableEntrance)
                 doors.Add(d);
         }
         return doors;

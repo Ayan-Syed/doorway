@@ -72,7 +72,7 @@ public partial class NavigationScreen
             return;
         // Standing at the door, back to it: that's where the position is, for the Localizer from now on too.
         if (localizer != null && Application.isPlaying)
-            localizer.SnapToDoor(m_From);
+            SnapTo(m_From);
         navigator.Begin(m_From, m_Destination);
         if (navigator.Route == null)
             return;

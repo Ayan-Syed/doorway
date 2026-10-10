@@ -16,6 +16,7 @@ public class LocalizerStressTests
         (115, "a snap at the wrong door, then five ARCore losses"),
         (73, "a snap tapped 3 m on from the door"),
         (64, "two ARCore losses, walking on by steps"),
+        (112, "a snap at an entrance by a room door 3 m away, which was the door really (now a candidate)"),
     };
 
     static ReplayEvaluator.StressWalkResult Replay(EvaluationData data, int seed)
@@ -69,6 +70,25 @@ public class LocalizerStressTests
         Assert.IsTrue(r.recoveries.All(x => x < 5f), $"recoveries {string.Join(", ", r.recoveries)} s");
     }
 
+    // With their back to the door the user sees the plates across the hallway, not their own: a nearby room's plate
+    // read close by is no sign of the wrong door unless it fits standing at that door. A plain "other room's plate
+    // within 3 m" rule moved these right snaps to wrong doors.
+    [TestCase(199)]
+    [TestCase(288)]
+    [TestCase(418)]
+    public void APlateAcrossTheHallwayDoesNotMoveARightSnap(int seed)
+    {
+        EvaluationData data = Data();
+        var tier = (SyntheticWalks.Tier)(seed % 3);
+        var lines = SyntheticWalks.Stress(data.StressFloor(), tier, seed, out SyntheticWalks.StressInfo info);
+        var engine = new LocalizerEngine(data.plan, data.walkable, data.field, data.walls, LocalizerEngine.Config.Full, 1);
+        var feeder = new ReplayEvaluator.Feeder(engine);
+        foreach (string line in lines)
+            feeder.Feed(line, out _, out _);
+        Assert.IsFalse(info.wrongSnap);
+        Assert.AreNotEqual(LocalizerEngine.SnapCheck.Corrected, engine.LastSnapCheck, $"corrected to {engine.SnapCheckText}");
+    }
+
     [Test]
     public void TypicalStressWalksMeetTheTargets()
     {
@@ -81,6 +101,7 @@ public class LocalizerStressTests
         Assert.Less(s.wrongShare, 0.01f, table);
         Assert.AreEqual(0, s.violations, table);
         Assert.Less(s.localizedP95, 2f, table);                      // displayed error
+        Assert.Less(s.localizedMax, 5f, table);
         Assert.That(s.calibration, Is.InRange(0.6f, 0.85f), table);  // Spread holds the error about 68% of the time
     }
 }

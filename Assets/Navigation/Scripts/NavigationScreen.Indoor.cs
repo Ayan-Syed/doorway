@@ -43,6 +43,12 @@ public partial class NavigationScreen
 
     const string NeedsViewMessage = "Hold your phone up to update your location";
     const string AskForSignMessage = "Point your camera at any room number";
+    // AskReason when the Localizer couldn't tell which of the entrances the user came through.
+    const string AmbiguousStart = "AmbiguousStart";
+    const string AmbiguousStartMessage = "Not sure which door you came in · point at a room number";
+    const string ConfirmHint = "Point at the room number beside you to confirm.";
+    // How long the tick shows on the dot after a snap is confirmed.
+    const float CheckSeconds = 2f;
     const string IconCamera = "\ue412";      // photo_camera
     const string IconSign = "\ue8f4";        // visibility
     const float BannerHeight = 112f;
@@ -60,6 +66,7 @@ public partial class NavigationScreen
         public Vector2 position;
         public float heading, spread;
         public bool needsView, askForSign, entrancePrompt;
+        public string askReason;
         public PlanDoor entranceGuess;
     }
 
@@ -74,6 +81,8 @@ public partial class NavigationScreen
     bool m_PromptHandled;          // answered: not offered again until the Localizer stops asking
     readonly List<(PlanPlace place, PlanDoor door)> m_SnapOthers = new List<(PlanPlace place, PlanDoor door)>();
     bool m_PickingDoor;            // the door list is for where you are, not for a walk
+    bool m_AwaitingCheck;          // snapped: the Localizer's check of it (a room number read) is still to come
+    float m_CheckUntil;            // the tick on the dot shows until then
 
     Vector2 m_DotAt = new Vector2(float.NaN, float.NaN);
     float m_DotHeading, m_DotSpread;
@@ -101,6 +110,7 @@ public partial class NavigationScreen
             askForSign = localizer.AskForSign,
             entrancePrompt = localizer.EntrancePrompt,
             entranceGuess = localizer.EntranceGuess,
+            askReason = localizer.AskReason,
         };
     }
 
@@ -179,6 +189,7 @@ public partial class NavigationScreen
             UpdateGpsPuck();
         map.TintPuck(PuckColor(), m_Indoor.state == LocalizerState.Lost);   // again after a day/night switch
         UpdateBanner();
+        UpdateSnapCheck();
         if (insideButton != null)
         {
             bool shown = Positioning && !inside && m_Step == Step.Home && !m_Searching;
@@ -241,7 +252,8 @@ public partial class NavigationScreen
             positionBanner.gameObject.SetActive(shown);
         if (!shown)
             return;
-        positionBannerText.text = ask ? AskForSignMessage : NeedsViewMessage;
+        positionBannerText.text = !ask ? NeedsViewMessage
+            : m_Indoor.askReason == AmbiguousStart ? AmbiguousStartMessage : AskForSignMessage;
         positionBannerIcon.text = ask ? IconSign : IconCamera;
         if (positionBannerButton.gameObject.activeSelf != ask)
             positionBannerButton.gameObject.SetActive(ask);
@@ -294,7 +306,7 @@ public partial class NavigationScreen
         string title = PlaceStyle.Title(place);
         snapTitle.text = entrance ? $"Just came in the {title}?" : $"At {PlaceStyle.DoorTitle(place, door)}?";
         snapHint.text = entrance ? "Stand just inside the doors, back to them, phone up"
-            : "Stand in the doorway, back to the door, phone up";
+            : $"Stand in the doorway, back to the door, phone up. {ConfirmHint}";
         snapChipsLabel.text = entrance ? "Another entrance" : "Another door";
 
         // The others nearest this one: entrances, or any doors.
@@ -385,14 +397,49 @@ public partial class NavigationScreen
             return;
         bool picking = m_PickingDoor;
         if (localizer != null)
-            localizer.SnapToDoor(door);
+            SnapTo(door);
         CloseSnapCard(false);
         Haptics.Tick(40);
         if (picking || m_Step != Step.Home)
             ResetHome(false);
         Snack(place == null ? "Got you" : place.kind == "exit" ? $"You're at the {PlaceStyle.Title(place)}"
-            : $"You're at {PlaceStyle.DoorTitle(place, door)}");
+            : $"You're at {PlaceStyle.DoorTitle(place, door)} · {ConfirmHint}");
         UpdateGpsPuck();
+    }
+
+    // Every snap goes here, so the Localizer's check of it (Confirmed, or Corrected to another door once it reads
+    // a room number) is watched for from then on.
+    void SnapTo(PlanDoor door)
+    {
+        if (localizer == null || door == null)
+            return;
+        localizer.SnapToDoor(door);
+        m_AwaitingCheck = true;
+    }
+
+    // The check, once it comes: a tick on the dot for a moment, or a word on where the user really is.
+    void UpdateSnapCheck()
+    {
+        if (m_AwaitingCheck && localizer != null)
+        {
+            LocalizerEngine.SnapCheck check = localizer.LastSnapCheck;
+            if (check == LocalizerEngine.SnapCheck.Confirmed)
+            {
+                m_AwaitingCheck = false;
+                m_CheckUntil = Time.unscaledTime + CheckSeconds;
+                Haptics.Tick(15);
+            }
+            else if (check == LocalizerEngine.SnapCheck.Corrected)
+            {
+                m_AwaitingCheck = false;
+                // The plate read: "121" is Room 121.
+                string text = localizer.SnapCheckText;
+                Snack(string.IsNullOrEmpty(text) ? "Corrected your position"
+                    : char.IsDigit(text[0]) ? $"Corrected to Room {text}" : $"Corrected to {text}");
+                Haptics.Tick(40);
+            }
+        }
+        map.ShowPuckCheck(Time.unscaledTime < m_CheckUntil && m_Indoor.state != LocalizerState.Outdoors);
     }
 
     // "I'm inside": the snap card at the entrance nearest the phone's location (the first if there's no fix).

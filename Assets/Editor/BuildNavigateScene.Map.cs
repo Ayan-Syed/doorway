@@ -152,6 +152,12 @@ public static partial class BuildNavigateScene
         TextIn(Stretch("Mark", unknown), "?", s_Bold, Mathf.RoundToInt(30f * s), Color.white, TextAnchor.MiddleCenter);
         unknown.gameObject.SetActive(false);
         map.puckUnknown = unknown.gameObject;
+        // A tick in the same spot, for a moment after the Localizer confirms a snap.
+        RectTransform check = Fixed("Check", you, Center, new Vector2(30f, 30f) * s, new Vector2(40f, 40f) * s);
+        Card(check, s_T.good, 20f * s, true);
+        TextIn(Stretch("Mark", check), IconDone, s_Icons, Mathf.RoundToInt(30f * s), Color.white, TextAnchor.MiddleCenter);
+        check.gameObject.SetActive(false);
+        map.puckCheck = check.gameObject;
         return map;
     }
 

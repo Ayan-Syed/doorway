@@ -221,6 +221,12 @@ public partial class FloorMap
             puckUnknown.SetActive(unknown);
     }
 
+    public void ShowPuckCheck(bool on)
+    {
+        if (puckCheck != null && puckCheck.activeSelf != on)
+            puckCheck.SetActive(on);
+    }
+
     // Whether a plan point is on screen.
     public bool Shows(Vector2 point)
     {

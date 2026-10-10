@@ -11,7 +11,7 @@ public enum LocalizerState { Outdoors, Converging, Localized, Lost }
 // order give the same answer. The Localizer feeds it on the phone and logs each input as it goes (PoseLog); the
 // evaluator (ReplayEvaluator) feeds it the logged inputs again, with signals switched off one at a time to see what
 // each is worth.
-public sealed class LocalizerEngine
+public sealed partial class LocalizerEngine
 {
     // Which signals are used. Raw is the baseline: ARCore's pose laid on the plan from the snap, nothing else.
     public struct Config
@@ -44,11 +44,11 @@ public sealed class LocalizerEngine
     // RampScans updates.
     const float FirstScan = 0.3f;
     const int RampScans = 10;
+    // And the door is often tapped a few steps on from it: this share of the particles goes anywhere in sight of the
+    // spot from NearFrom to NearReach metres away, so a walk along a plain corridor can't settle a few metres out.
     // A snap may have been at another door (the user picked the wrong one, or GPS suggested it): this share of the
     // particles goes to the alternatives (other entrances, or doors nearby), the rest to the door snapped at.
     const float AlternativeShare = 0.15f;
-    // And the door is often tapped a few steps on from it: this share of the particles goes anywhere in sight of the
-    // spot from NearFrom to NearReach metres away, so a walk along a plain corridor can't settle a few metres out.
     const float NearShare = 0.15f, NearFrom = 1f, NearReach = 4f;
     // Localized only on evidence: this many scans that fit (a share of points near a wall of at least FitShare) or
     // walls matched or a plate, and almost all the weight (Wide of it) within twice LocalizedSpread: a snap alone, or
@@ -108,6 +108,7 @@ public sealed class LocalizerEngine
 
     readonly FloorPlan m_Plan;
     readonly Walkable m_Walkable;
+    double m_SnapTime;
     readonly ScanMatcher m_Scan;
     readonly WallMatcher m_Walls;
     readonly Config m_Config;
@@ -147,6 +148,12 @@ public sealed class LocalizerEngine
         bool fits = m_Filter.AddSignObservation(bearing, range, sigma, at, normals);
         m_Filter.SeedOnContradiction = null;
         m_Filter.PlateOutlier = 0f;
+        if (m_Filter.SignSeeded)
+            DropShadows();   // two plates agreed on somewhere else: the snap's doors are history
+        else
+            PlateShadows(bearing, range, sigma, at, normals);
+        if (CheckSnap(t, key, worldRange) && LastSnapCheck == SnapCheck.Corrected)
+            fits = true;   // the plate's own door's cloud took over, and it fits there
         if (fits)
         {
             m_Contradicted = null;
@@ -213,6 +220,7 @@ public sealed class LocalizerEngine
             MinCount = MinParticles,
         };
         m_Scan = field != null ? new ScanMatcher(field, MaxParticles) : null;
+        m_Field = field;
         if (plan?.signs != null)
         {
             foreach (PlanSign sign in plan.signs)
@@ -257,6 +265,8 @@ public sealed class LocalizerEngine
                 m_Filter.SeedHypothesis(count - each * (k + 1), each, alternatives[k], alternativeYaws[k], SnapSpread,
                     SnapHeadingSpread);
         }
+        m_SnapTime = t;
+        StartShadows(spot, camera, alternatives, alternativeYaws);
         m_SureSince = m_LooseSince = m_MisfitSince = m_WideSince = -1;
         m_RingUntil = -1;
         m_ScanYaw = m_WallsYaw = float.NaN;
@@ -271,6 +281,7 @@ public sealed class LocalizerEngine
         m_Time = t;
         if (State == LocalizerState.Outdoors || m_Config.raw)
             return;
+        DropShadows();
         m_Filter.Scatter(m_Filter.Estimate, RelocalizeRadius, true);
         m_Scans = 0;
         m_Evidence = 0;
@@ -311,6 +322,7 @@ public sealed class LocalizerEngine
             return;
         }
         m_Filter.Follow(camera, cameraYaw, tracking);
+        FollowShadows(camera, cameraYaw, tracking);
         if (m_RingUntil >= 0 && t > m_RingUntil)
         {
             m_Filter.ClearRing();
@@ -327,8 +339,10 @@ public sealed class LocalizerEngine
         if (!Active || !m_Config.depth || m_Scan == null || !Moved(ref m_ScanCamera, ref m_ScanYaw, ScanDistance))
             return false;
         float strength = Mathf.Min(1f, FirstScan + (1f - FirstScan) * m_Scans / RampScans);
+        ScanShadows(points, count, strength);
         if (!m_Scan.Weigh(m_Filter, points, count, strength))
             return false;
+        ScannedMain();
         m_Scans++;
         if (m_Scan.LastHitShare >= FitShare)
             m_Evidence++;
@@ -479,6 +493,7 @@ public sealed class LocalizerEngine
             return;
         }
         m_Filter.StepBlindWorld(heading, length > 0f ? length : StepLength, StepLengthSigma, sigma);
+        StepShadows(heading, length > 0f ? length : StepLength, sigma);
         Measure();
     }
 
@@ -505,6 +520,7 @@ public sealed class LocalizerEngine
     {
         if (m_Config.raw || State == LocalizerState.Outdoors)
             return;
+        DecideShadows();
         Vector2 previous = m_Filter.Estimate;
         bool jumped = m_HadEstimate && (previous - m_LastEstimate).sqrMagnitude > ModeJump * ModeJump;
         m_LastEstimate = previous;
@@ -553,7 +569,7 @@ public sealed class LocalizerEngine
             else if (m_MisfitSince >= 0 && m_Time - m_MisfitSince >= MisfitSeconds)
                 SetState(LocalizerState.Lost, "scan");
             else if (State == LocalizerState.Converging && m_SureSince >= 0 && m_Time - m_SureSince >= SettleSeconds &&
-                     m_Evidence >= EvidenceNeeded && !m_NeedsSign && !Doubting &&
+                     m_Evidence >= EvidenceNeeded && !m_NeedsSign && !Doubting && m_Shadows.Count == 0 &&
                      m_Filter.Radius(Wide) < 2f * LocalizedSpread)
                 SetState(LocalizerState.Localized, "sure");
             else if (State == LocalizerState.Localized && m_LooseSince >= 0 && m_Time - m_LooseSince >= SettleSeconds)
@@ -570,6 +586,7 @@ public sealed class LocalizerEngine
         NotSure = State == LocalizerState.Localized ? null
             : State == LocalizerState.Lost ? "lost"
             : !m_Tracking ? "blind"
+            : m_Shadows.Count > 0 ? "other doors"
             : m_NeedsSign ? "needs plate"
             : Doubting ? "doubting a plate"
             : Spread >= LocalizedSpread ? "position spread"
@@ -632,6 +649,7 @@ public sealed class LocalizerEngine
         if (state == LocalizerState.Lost)
         {
             Relocalizations++;
+            DropShadows();
             m_NeedsSign = true;
             m_PlacedBy = null;
             m_Evidence = 0;

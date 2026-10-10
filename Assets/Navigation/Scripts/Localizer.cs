@@ -56,7 +56,14 @@ public partial class Localizer : MonoBehaviour
     /// <summary>Not confident, and the camera can't see (lowered, or ARCore not tracking): "Hold your phone up".</summary>
     public bool NeedsView { get; private set; }
     /// <summary>Lost: "Point your camera at a room number".</summary>
-    public bool AskForSign => State == LocalizerState.Lost;
+    public bool AskForSign => State == LocalizerState.Lost || m_Engine?.AskReason != null;
+    /// <summary>Why a room number is asked for: "Lost", "AmbiguousStart" (the walk hasn't told the snapped door from
+    /// a look-alike yet), or null.</summary>
+    public string AskReason => State == LocalizerState.Lost ? "Lost" : m_Engine?.AskReason;
+    /// <summary>What a plate beside the snapped room door said (Corrected: the snap moved to SnapCheckText's door).
+    /// </summary>
+    public LocalizerEngine.SnapCheck LastSnapCheck => m_Engine?.LastSnapCheck ?? LocalizerEngine.SnapCheck.None;
+    public string SnapCheckText => m_Engine?.SnapCheckText;
     /// <summary>Outdoors: the entrance GPS puts the user nearest, or null.</summary>
     public PlanDoor EntranceGuess { get; private set; }
     /// <summary>GPS says the user just walked in near EntranceGuess: offer the snap there.</summary>
@@ -204,8 +211,9 @@ public partial class Localizer : MonoBehaviour
     }
 
     // The doors a snap at this one might really have been at (the user picked the wrong one, or GPS suggested it):
-    // the other entrances if it's an entrance, else the doors within AlternativeReach. With their spots and the yaw
-    // each would give, the phone facing as it does now (SyntheticWalks.SnapAlternatives models the same).
+    // the doors within AlternativeReach, and the other entrances within ConfusableEntrance if it's an entrance.
+    // With their spots and the yaw each would give, the phone facing as it does now (SyntheticWalks.SnapAlternatives
+    // models the same).
     void Alternatives(PlanDoor door, Vector2 spot)
     {
         m_Alternatives.Clear();
@@ -216,15 +224,14 @@ public partial class Localizer : MonoBehaviour
         bool entrance = plan.places.Any(p => p.kind == "exit" && p.doors.Contains(door));
         foreach (PlanPlace place in plan.places)
         {
-            if (entrance && place.kind != "exit")
-                continue;
             foreach (PlanDoor other in place.doors)
             {
                 if (other == door)
                     continue;
                 navigator.DoorPose(other, out Vector2 at, out float yaw);
                 float distance = Vector2.Distance(at, spot);
-                if (distance < 0.5f || !entrance && distance > AlternativeReach)
+                bool otherEntrance = entrance && place.kind == "exit";
+                if (distance < 0.5f || distance > (otherEntrance ? ConfusableEntrance : AlternativeReach))
                     continue;
                 m_Alternatives.Add(at);
                 m_AlternativeYaws.Add(yaw);
@@ -232,7 +239,8 @@ public partial class Localizer : MonoBehaviour
         }
     }
 
-    const float AlternativeReach = 12f;
+    // Entrances further apart than ConfusableEntrance, GPS has told apart before the user is in.
+    const float AlternativeReach = 12f, ConfusableEntrance = 25f;
     readonly List<Vector2> m_Alternatives = new List<Vector2>();
     readonly List<float> m_AlternativeYaws = new List<float>();
 

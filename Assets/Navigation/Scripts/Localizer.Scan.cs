@@ -52,6 +52,8 @@ public sealed class ScanMatcher
     public float LastBestMean { get; private set; }
     /// <summary>The best particle's share of points within 30 cm of a wall.</summary>
     public float LastHitShare { get; private set; }
+    /// <summary>log Σ weight × likelihood of the last scan over the cloud weighed (tempered, trusted).</summary>
+    public double LastLogMarginal { get; private set; }
     /// <summary>How much the last scan was trusted (see Weigh).</summary>
     public float LastTrust { get; private set; }
     /// <summary>Scans weighed so far.</summary>
@@ -141,8 +143,18 @@ public sealed class ScanMatcher
         // of it the best pose explains, from none at FitFloor to all at FitFull.
         float trust = Mathf.Clamp01((LastHitShare - FitFloor) / (FitFull - FitFloor));
         LastTrust = trust;
+        double marginal = 0.0, weights = 0.0, top = bestLog * trust;
         for (int i = 0; i < particles; i++)
+        {
+            float w = filter.ParticleWeight(i);
+            weights += w;
+            if (w <= 0f)
+                continue;
             m_LogLikelihood[i] *= trust;
+            marginal += w * System.Math.Exp(m_LogLikelihood[i] - top);
+        }
+        // log Σ w p(z | x) / Σ w: the scan's likelihood under the whole cloud, as weighed (for comparing hypotheses).
+        LastLogMarginal = top + System.Math.Log(System.Math.Max(marginal / System.Math.Max(weights, 1e-30), 1e-30));
         // Table 8.3: the averages see the measurement's likelihood under the prediction, before resampling.
         filter.Reweight(m_LogLikelihood, MaxSpan);
         filter.ReportLikelihood(average);

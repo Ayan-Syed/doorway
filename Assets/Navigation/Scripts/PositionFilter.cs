@@ -151,6 +151,14 @@ public sealed class PositionFilter
     /// sees it just so.</summary>
     public float PlateOutlier { get; set; }
 
+    /// <summary>The log of the walk's likelihood so far under this cloud: each motion update adds the log of the
+    /// weight that didn't walk into a wall (at least MinSurvival). Shadow hypotheses (LocalizerEngine) compare it.</summary>
+    public double MotionLog { get; set; }
+    const float MinSurvival = 1e-3f;
+
+    /// <summary>The last sign observation's Σ weight × likelihood (0: nothing could have seen it).</summary>
+    public float LastSignTotal { get; private set; }
+
     /// <summary>Whether the last sign observation started the cloud again on the sign's rings.</summary>
     public bool SignSeeded { get; private set; }
     public int RecoveriesInARow { get; private set; }
@@ -414,7 +422,7 @@ public sealed class PositionFilter
         float scaleSigma = ScaleNoise * Mathf.Sqrt(trans) * noise;
         Vector2 expected = Estimate + ToPlan(worldMove, Yaw) * Scale;
 
-        float alive = 0f;
+        float alive = 0f, before = TotalWeight();
         for (int i = 0; i < m_Count; i++)
         {
             if (m_Weight[i] <= 0f)
@@ -435,6 +443,7 @@ public sealed class PositionFilter
             alive += m_Weight[i];
         }
 
+        Survived(alive, before);
         if (alive <= 0f)
         {
             Recover(expected);
@@ -468,7 +477,7 @@ public sealed class PositionFilter
         m_Blind = true;
         m_Walked += length;
         Vector2 direction = planStep / length;
-        float alive = 0f;
+        float alive = 0f, before = TotalWeight();
         for (int i = 0; i < m_Count; i++)
         {
             if (m_Weight[i] <= 0f)
@@ -490,6 +499,7 @@ public sealed class PositionFilter
             m_Position[i] = to;
             alive += m_Weight[i];
         }
+        Survived(alive, before);
         if (alive <= 0f)
         {
             Recover(Estimate + planStep);
@@ -715,6 +725,7 @@ public sealed class PositionFilter
         PrepareStandOffs(landmarks, normals);
 
         float total = WeighSign(worldBearing, range, rangeSigma, landmarks, normals);
+        LastSignTotal = total;
         if (total <= 1e-12f)
         {
             // Nothing here could have seen it: a misread while the filter is sure, else the filter is wrong.
@@ -835,6 +846,58 @@ public sealed class PositionFilter
         Uniform();
         ForgetRecoveries();
         ResetAverages();
+        UpdateEstimate();
+    }
+
+    float TotalWeight()
+    {
+        float total = 0f;
+        for (int i = 0; i < m_Count; i++)
+            total += m_Weight[i];
+        return total;
+    }
+
+    void Survived(float alive, float before)
+    {
+        if (before > 0f)
+            MotionLog += Math.Log(Mathf.Max(alive / before, MinSurvival));
+    }
+
+    /// <summary>This cloud becomes a copy of other's (thinned by low-variance resampling if other has more particles
+    /// than this one holds): pose, weights, base yaw and camera. For swapping a shadow hypothesis in.</summary>
+    public void CopyFrom(PositionFilter other)
+    {
+        BaseYaw = other.BaseYaw;
+        HeadingLimit = other.HeadingLimit;
+        m_Camera = other.m_Camera;
+        m_CameraYaw = other.m_CameraYaw;
+        m_Lost = other.m_Lost;
+        m_Blind = other.m_Blind;
+        MotionLog = other.MotionLog;
+        int n = Mathf.Min(other.m_Count, m_Capacity);
+        float total = other.TotalWeight();
+        float step = total / n, target = (float)m_Random.NextDouble() * step, cumulative = other.m_Weight[0];
+        int j = 0;
+        for (int i = 0; i < n; i++, target += step)
+        {
+            if (n == other.m_Count)
+            {
+                j = i;
+            }
+            else
+            {
+                while (target > cumulative && j < other.m_Count - 1)
+                    cumulative += other.m_Weight[++j];
+            }
+            m_Position[i] = other.m_Position[j];
+            m_Heading[i] = other.m_Heading[j];
+            m_Scale[i] = other.m_Scale[j];
+            m_Weight[i] = n == other.m_Count ? other.m_Weight[j] : 1f;
+        }
+        m_Count = n;
+        Normalize(TotalWeight());
+        ForgetRecoveries();
+        ClearRing();
         UpdateEstimate();
     }
 
