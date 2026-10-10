@@ -1,0 +1,2 @@
+# upload.py only (doorway_logs.py and ingest.py need nothing beyond what Databricks runtimes have).
+databricks-sdk==0.145.0
