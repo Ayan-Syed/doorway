@@ -45,6 +45,8 @@ public static partial class BuildNavigateScene
         screen.nightThemeName = NightTheme;
         screen.uiCamera = uiCamera;
         screen.location = screen.gameObject.AddComponent<UserLocation>();
+        screen.voiceInput = screen.gameObject.AddComponent<VoiceInput>();
+        screen.voiceOutput = screen.gameObject.AddComponent<VoiceOutput>();
         screen.markerSprites = s_Emoji;
         screen.themeColors = screen.gameObject.AddComponent<ThemeColors>();
         // The Localizer the AR part of the scene made (none: GPS only, every walk starts at a door).
@@ -112,6 +114,7 @@ public static partial class BuildNavigateScene
         CreateArrived(screen, safeArea);
         CreateDirections(screen, safeArea);
         CreateHome(screen, safeArea);
+        CreateMic(screen, safeArea);
         CreatePositionBanner(screen, safeArea);
         CreateSnapCard(screen, safeArea);
         CreateSettings(screen, safeArea);

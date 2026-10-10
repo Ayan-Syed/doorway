@@ -251,6 +251,7 @@ public partial class NavigationScreen
                 settingsPanel.gameObject.SetActive(false);
         }
 
+        UpdateVoice();
         if (snackbar.alpha > 0f)
         {
             PlaceSnackbar();   // it follows a sheet that's moving
@@ -335,11 +336,14 @@ public partial class NavigationScreen
         PlaceSnackbar();
     }
 
-    // Just above whatever is along the bottom, but never above 60 % of the screen.
+    // Just above whatever is along the bottom (the position banner and the mic button too), but never above 60 % of
+    // the screen.
     void PlaceSnackbar()
     {
         var rect = (RectTransform)snackbar.transform;
         float y = Mathf.Min(BottomUI(), safeArea.rect.height * 0.6f) + 24f + BannerTaken;   // over the position banner
+        if (m_MicTop >= 0f && !settingsPanel.gameObject.activeSelf)
+            y = Mathf.Max(y, m_MicTop + 16f);
         if (rect.anchoredPosition.y != y)
             rect.anchoredPosition = new Vector2(rect.anchoredPosition.x, y);
     }

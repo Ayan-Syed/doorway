@@ -1,0 +1,32 @@
+{"intent": "destination", "context": null, "text": "hey so my professor said the exam is in one oh seven where is that", "calls": [{"name": "set_destination", "arguments": {"place": "107"}}]}
+{"intent": "destination", "context": null, "text": "i really need to pee", "calls": [{"name": "set_destination", "arguments": {"place": "restroom"}}]}
+{"intent": "destination", "context": null, "text": "where did the java city coffee shop used to be", "calls": [{"name": "set_destination", "arguments": {"place": "117"}}]}
+{"intent": "destination", "context": null, "text": "the career fair is at the exchange how do i get there", "calls": [{"name": "set_destination", "arguments": {"place": "148"}}]}
+{"intent": "destination", "context": null, "text": "i'm in a wheelchair and need to go upstairs", "calls": [{"name": "set_destination", "arguments": {"place": "elevator"}}]}
+{"intent": "destination", "context": null, "text": "how do i get out of this building", "calls": [{"name": "set_destination", "arguments": {"place": "exit"}}]}
+{"intent": "destination", "context": null, "text": "i need to walk over to the engineering building", "calls": [{"name": "set_destination", "arguments": {"place": "exit-e"}}]}
+{"intent": "destination", "context": null, "text": "ladies room please", "calls": [{"name": "set_destination", "arguments": {"place": "womens-restroom"}}]}
+{"intent": "destination", "context": null, "text": "i have a meeting in the office suite", "calls": [{"name": "set_destination", "arguments": {"place": "145"}}]}
+{"intent": "destination", "context": null, "text": "room one twenty one for my stats class", "calls": [{"name": "set_destination", "arguments": {"place": "121"}}]}
+{"intent": "location", "context": null, "text": "okay i'm standing with my back to room one thirteen", "calls": [{"name": "set_location", "arguments": {"place": "113"}}]}
+{"intent": "location", "context": null, "text": "i just walked in through the north doors", "calls": [{"name": "set_location", "arguments": {"place": "exit-n"}}]}
+{"intent": "location", "context": null, "text": "i'm right by the elevators in the main lobby", "calls": [{"name": "set_location", "arguments": {"place": "elev-w"}}]}
+{"intent": "location", "context": null, "text": "there's a big staircase in front of me in the atrium", "calls": [{"name": "set_location", "arguments": {"place": "stair-127"}}]}
+{"intent": "location", "context": null, "text": "i came out of the west door of one oh seven", "calls": [{"name": "set_location", "arguments": {"place": "107", "door": "west"}}]}
+{"intent": "location", "context": null, "text": "i'm outside one nineteen and i can see the north west entrance", "calls": [{"name": "set_location", "arguments": {"place": "119", "near": "exit-nw"}}]}
+{"intent": "location", "context": "Where are you right now?", "text": "uhh by one forty six i think", "calls": [{"name": "set_location", "arguments": {"place": "146"}}]}
+{"intent": "location", "context": "Where are you? Tell me a room number or something you can see.", "text": "the lounge", "calls": [{"name": "set_location", "arguments": {"place": "130"}}]}
+{"intent": "both", "context": null, "text": "i'm at the south east entrance and my class is in one ten", "calls": [{"name": "set_location", "arguments": {"place": "exit-se"}}, {"name": "set_destination", "arguments": {"place": "110"}}]}
+{"intent": "both", "context": null, "text": "just got out of one twenty six where's the closest bathroom", "calls": [{"name": "set_location", "arguments": {"place": "126"}}, {"name": "set_destination", "arguments": {"place": "restroom"}}]}
+{"intent": "both", "context": null, "text": "from the lobby elevators to the exchange", "calls": [{"name": "set_location", "arguments": {"place": "elev-w"}}, {"name": "set_destination", "arguments": {"place": "148"}}]}
+{"intent": "destination", "context": "Where do you want to go?", "text": "one forty seven", "calls": [{"name": "set_destination", "arguments": {"place": "147"}}]}
+{"intent": "choice", "context": "Which one are you at: the men's restroom in the atrium wing, or the men's restroom in the lobby?", "text": "the lobby", "calls": [{"name": "set_location", "arguments": {"place": "wc-m-w"}}]}
+{"intent": "choice", "context": "Which one do you want: the atrium elevator, or the lobby elevators?", "text": "whichever is in the atrium", "calls": [{"name": "set_destination", "arguments": {"place": "elev-a"}}]}
+{"intent": "command", "context": "Hold your phone up and say start when you're ready.", "text": "alright go", "calls": [{"name": "command", "arguments": {"action": "start"}}]}
+{"intent": "command", "context": null, "text": "wait which way was i supposed to turn", "calls": [{"name": "command", "arguments": {"action": "next_step"}}]}
+{"intent": "command", "context": null, "text": "how many minutes till i get there", "calls": [{"name": "command", "arguments": {"action": "how_far"}}]}
+{"intent": "command", "context": null, "text": "these arrows are pointing into a wall", "calls": [{"name": "command", "arguments": {"action": "lost"}}]}
+{"intent": "command", "context": null, "text": "ok shut up for a bit", "calls": [{"name": "command", "arguments": {"action": "mute"}}]}
+{"intent": "command", "context": null, "text": "i changed my mind cancel", "calls": [{"name": "command", "arguments": {"action": "end"}}]}
+{"intent": "command", "context": null, "text": "what's the wifi password", "calls": [{"name": "command", "arguments": {"action": "unknown"}}]}
+{"intent": "command", "context": null, "text": "sorry i didn't catch that", "calls": [{"name": "command", "arguments": {"action": "repeat"}}]}
