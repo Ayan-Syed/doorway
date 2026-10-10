@@ -1,0 +1,12 @@
+# Text files keep LF on every machine (bash scripts break with CRLF; Unity reads either)
+* text=auto eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary
+*.ttf binary
+*.bytes binary
+*.npz binary
+*.apk binary
