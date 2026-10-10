@@ -71,7 +71,8 @@ public static partial class BuildNavigateScene
         BestFit(screen.homeTitle, 42);
         screen.homeSubtitle = TextIn(TopBand("Subtitle", sheet, 120f, 48f, 48f, 48f), "Floor 1", s_Regular, 36,
             s_T.onSurfaceVariant, TextAnchor.MiddleLeft);
-        screen.homeList = List(sheet, screen.homeSheet, 184f);
+        CreateRoomSearch(screen, sheet);
+        screen.homeList = List(sheet, screen.homeSheet, 296f);
 
         // Into the building (Go inside) or back to the whole floor, riding on the sheet's top edge at the right.
         RectTransform whole = Fixed("Whole Floor", sheet, Vector2.one, new Vector2(-32f, 24f), new Vector2(0f, 84f));
@@ -103,6 +104,31 @@ public static partial class BuildNavigateScene
 
         // The map's names keep out from under these.
         screen.map.keepClear = new[] { credit, locate, whole };
+    }
+
+    // A small search box over the directory's list, for the building's rooms only. Under the sheet's peek, so it
+    // shows (NavigationScreen fades it in) as the sheet comes up.
+    static void CreateRoomSearch(NavigationScreen screen, RectTransform sheet)
+    {
+        RectTransform box = TopBand("Room Search", sheet, 188f, 92f, 48f, 48f);
+        Rounded(box, s_T.surfaceVariant, 46f).raycastTarget = true;
+        screen.roomSearch = box.gameObject.AddComponent<CanvasGroup>();
+        TextIn(Fixed("Icon", box, new Vector2(0f, 0.5f), new Vector2(52f, 0f), new Vector2(60f, 60f)), IconSearch,
+            s_Icons, 44, s_T.onSurfaceVariant, TextAnchor.MiddleCenter);
+
+        RectTransform fieldRect = Stretch("Field", box, 96f, 96f, 0f, 0f);
+        var fieldTarget = fieldRect.gameObject.AddComponent<Image>();
+        fieldTarget.color = Color.clear;   // the field's hit area
+        var field = fieldRect.gameObject.AddComponent<InputField>();
+        Text text = TextIn(Stretch("Text", fieldRect), "", s_Regular, 38, s_T.onSurface, TextAnchor.MiddleLeft);
+        Text placeholder = TextIn(Stretch("Placeholder", fieldRect), "Find a room number or name", s_Regular, 38,
+            s_T.onSurfaceVariant, TextAnchor.MiddleLeft);
+        ConfigureField(field, fieldTarget, text, placeholder);
+        screen.roomSearchField = field;
+
+        RectTransform clear = Fixed("Clear", box, new Vector2(1f, 0.5f), new Vector2(-48f, 0f), new Vector2(80f, 80f));
+        screen.roomSearchClear = FlatButton(clear, 40f);
+        TextIn(Stretch("Icon", clear), IconClose, s_Icons, 40, s_T.onSurfaceVariant, TextAnchor.MiddleCenter);
     }
 
     static void CreatePlaceSheet(NavigationScreen screen, RectTransform panel)

@@ -13,6 +13,7 @@ public partial class NavigationScreen
         m_SavedQuery = "";
         m_Searching = false;
         searchField.SetTextWithoutNotify("");
+        SetRoomQuery("");
         homeList.ResetSearch();
         ShowPlanBuilding();
         ShowHome();
@@ -41,7 +42,10 @@ public partial class NavigationScreen
         navigator.Stop();
         m_Destination = m_Selected = null;
         searchField.SetTextWithoutNotify(m_SavedQuery);
-        homeList.Filter(m_SavedQuery);
+        if (m_SavedQuery.Length == 0 && RoomQuery.Length > 0)
+            homeList.FilterWithin(RoomQuery);   // back from a room found in the sheet's own search
+        else
+            homeList.Filter(m_SavedQuery);
         Show(Step.Home);
         // A sheet that was at the top comes back to the middle, unless searching.
         OpenSheet(homeSheet, m_Searching ? homeSheet.stops.Length - 1 : Mathf.Min(homeSheet.Stop, 1));
@@ -111,6 +115,12 @@ public partial class NavigationScreen
         searchLeadIcon.text = searching || m_Step == Step.Place ? IconBack : IconSearch;
         if (searching)
         {
+            // The search bar searches everywhere; the sheet's search lets go of the list.
+            if (RoomQuery.Length > 0)
+            {
+                SetRoomQuery("");
+                homeList.Filter(searchField.text);
+            }
             SetFloorMenu(false);
             ShowPlanBuilding();   // the search covers the floor's rooms and every building
             homeSheet.MoveTo(homeSheet.stops.Length - 1, false);
@@ -221,6 +231,9 @@ public partial class NavigationScreen
             SetAlpha(locate, chrome);
         if (attribution != null)
             SetAlpha(attribution, chrome);
+        // The sheet's search shows once the sheet's up past its peek.
+        if (roomSearch != null)
+            SetAlpha(roomSearch, Mathf.Clamp01((homeSheet.Height - HomePeek) / 80f));
         if (chrome < 0.5f && m_FloorMenuOpen)
             SetFloorMenu(false);
     }
@@ -285,6 +298,38 @@ public partial class NavigationScreen
         GameObject list = homeList.scroll != null ? homeList.scroll.gameObject : homeList.gameObject;
         if (list.activeSelf != shown)
             list.SetActive(shown);
+        if (roomSearch != null && roomSearch.gameObject.activeSelf != shown)
+            roomSearch.gameObject.SetActive(shown);
+    }
+
+    string RoomQuery => roomSearchField != null ? roomSearchField.text : "";
+
+    // Typing in the sheet's search: the building's places containing every typed word, as in any part of a
+    // room number or a name ("14" finds Room 145, "exch" 148 The Exchange). Campus buildings stay out of it.
+    void OnRoomSearch(string query)
+    {
+        if (m_Searching || searchField.text.Length > 0)
+        {
+            m_SavedQuery = "";
+            searchField.SetTextWithoutNotify("");
+            SetSearching(false);
+        }
+        homeList.FilterWithin(query);
+        roomSearchClear.gameObject.SetActive(query.Length > 0);
+    }
+
+    void ClearRoomSearch()
+    {
+        roomSearchField.text = "";   // notifies: the whole list again
+    }
+
+    // Writes the sheet's search without filtering; the caller filters.
+    void SetRoomQuery(string query)
+    {
+        if (roomSearchField == null)
+            return;
+        roomSearchField.SetTextWithoutNotify(query);
+        roomSearchClear.gameObject.SetActive(query.Length > 0);
     }
 
     // The Whole floor / Go inside button.

@@ -202,6 +202,8 @@ public partial class NavigationScreen
                 bool clear = searchField.text.Length > 0;
                 if (searchClear.gameObject.activeSelf != clear)
                     searchClear.gameObject.SetActive(clear);
+                if (roomSearchField != null && roomSearchField.isFocused && !homeSheet.IsAtTop)
+                    homeSheet.MoveTo(homeSheet.stops.Length - 1, false);   // the whole list over the keyboard
                 UpdateIndoors(false);
                 UpdateHomeChrome();
                 break;
@@ -269,6 +271,8 @@ public partial class NavigationScreen
             case Step.Home:
                 if (m_Searching || searchField.text.Length > 0)
                     EndSearch();
+                else if (RoomQuery.Length > 0)
+                    ClearRoomSearch();
                 else if (m_Kind != null)
                     SetKind(null, false);
                 else if (m_Building != null)
