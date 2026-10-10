@@ -1,0 +1,22 @@
+name: Data and routing tests
+
+on:
+  push:
+    paths: ["Tools/**", "Assets/Navigation/Data/**", "FloorPlans/**", ".github/workflows/data.yml"]
+  pull_request:
+    paths: ["Tools/**", "Assets/Navigation/Data/**", "FloorPlans/**", ".github/workflows/data.yml"]
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: Tools/requirements.txt
+      - run: pip install -r Tools/requirements.txt
+      - run: python -m pytest Tools/tests -q
