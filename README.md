@@ -2,8 +2,7 @@
 
 Doorway is an Android app for indoor navigation on UCF's campus. It uses augmented reality. It finds where you are
 inside a building from AR tracking, step counting, wall matching and room-number signs it reads with the camera.
-Then it routes you to a room and draws the route on the floor in AR, with voice guidance as you walk. The app
-currently covers **BA1 floor 1** and **HEC floor 1**. An outdoor campus map links the two buildings.
+Then it routes you to a room and draws the route on the floor in AR, with voice guidance as you walk. 
 
 ## Tech stack
 
